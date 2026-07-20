@@ -1,35 +1,44 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { queryOne } from '../db/connection';
+import { jwtSecret } from '../shared/config';
 import { sendError } from '../lib/response';
-import type { AuthTokenPayload } from '../types';
+import type { UserRole } from '../generated/prisma/client';
 
-function jwtSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET is not set');
-  return secret;
+// Access token payload — see modules/auth/tokens.ts for signing.
+export interface AccessTokenPayload {
+  sub: string; // userId
+  venue_id: string;
+  role: UserRole;
+  jti: string;
 }
 
-export function signToken(payload: AuthTokenPayload): string {
-  return jwt.sign(payload, jwtSecret(), { expiresIn: '16h' });
+export interface AuthContext {
+  userId: string;
+  venueId: string;
+  role: UserRole;
 }
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: AuthContext;
+    }
+  }
+}
+
+// Pure JWT verification — no DB round-trip. Access tokens are short-lived by
+// design (see shared/config.ts ACCESS_TOKEN_TTL); revocation happens at the
+// refresh-token layer, not here. If an account is deactivated mid-session it
+// stays valid until its access token naturally expires.
+export function authenticate(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return sendError(res, 'UNAUTHORIZED', 'No token provided');
   }
 
   try {
-    const decoded = jwt.verify(header.slice(7), jwtSecret()) as AuthTokenPayload;
-    const staff = await queryOne<{ id: string; name: string; role: string; is_active: boolean }>(
-      'SELECT id, name, role, is_active FROM staff WHERE id = $1 AND venue_id = $2',
-      [decoded.staffId, decoded.venueId],
-    );
-    if (!staff) return sendError(res, 'UNAUTHORIZED', 'Staff not found');
-    if (!staff.is_active) return sendError(res, 'UNAUTHORIZED', 'Account deactivated');
-
-    req.user = { ...decoded, name: staff.name };
+    const decoded = jwt.verify(header.slice(7), jwtSecret()) as AccessTokenPayload;
+    req.auth = { userId: decoded.sub, venueId: decoded.venue_id, role: decoded.role };
     next();
   } catch {
     return sendError(res, 'UNAUTHORIZED', 'Invalid or expired token');

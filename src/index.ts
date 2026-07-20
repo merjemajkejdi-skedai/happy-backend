@@ -3,11 +3,7 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import { authRouter } from './routes/auth';
-import { tablesRouter } from './routes/tables';
-import { menuRouter } from './routes/menu';
-import { ordersRouter } from './routes/orders';
-import { kitchenRouter } from './routes/kitchen';
+import { authRouter } from './modules/auth/routes';
 import { sendError } from './lib/response';
 
 const app = express();
@@ -18,11 +14,7 @@ app.use(express.json());
 
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
 
-app.use('/auth', authRouter);
-app.use('/tables', tablesRouter);
-app.use('/menu', menuRouter);
-app.use('/orders', ordersRouter);
-app.use('/', kitchenRouter); // exposes /kitchen/events, /bar/events, /order-items/:id/status
+app.use('/api/v1/auth', authRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
