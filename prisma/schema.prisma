@@ -1,0 +1,534 @@
+// Happy Restaurant POS — complete Phase 1 schema.
+// Migrations only in this file's scope: no routes, no services, no business
+// logic read this schema yet. See docs/SCHEMA.md for a plain-English summary
+// and the non-obvious constraints Prisma can't express declaratively
+// (partial unique indexes, CHECK constraints) — those are hand-added to the
+// generated migration SQL, not visible here.
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgcrypto, citext]
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum VenueType {
+  happy_restaurant
+  happy_bar
+  happy_hybrid
+
+  @@map("venue_type")
+}
+
+// manager/bar are defined but UNUSED in Phase 1 — no route or guard exercises them yet.
+enum UserRole {
+  waiter
+  kitchen
+  admin
+  manager
+  bar
+
+  @@map("user_role")
+}
+
+enum LoginMethod {
+  pin
+  email
+  both
+
+  @@map("login_method")
+}
+
+enum TableNaming {
+  number
+  name
+  both
+
+  @@map("table_naming")
+}
+
+enum ServiceMode {
+  table
+  counter
+
+  @@map("service_mode")
+}
+
+enum Destination {
+  kitchen
+  bar
+  none
+
+  @@map("destination")
+}
+
+enum TableStatus {
+  free
+  occupied
+  reserved
+  dirty
+
+  @@map("table_status")
+}
+
+enum OrderStatus {
+  draft
+  open
+  sent
+  partially_served
+  served
+  closed
+  cancelled
+
+  @@map("order_status")
+}
+
+enum OrderItemStatus {
+  pending
+  sent
+  preparing
+  ready
+  served
+  cancelled
+
+  @@map("order_item_status")
+}
+
+enum ModifierType {
+  single
+  multiple
+
+  @@map("modifier_type")
+}
+
+// ── Core ─────────────────────────────────────────────────────────────────────
+
+model Venue {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  slug          String    @unique
+  venueType     VenueType @map("venue_type")
+  timezone      String    @default("Europe/Tirane")
+  currency      String    @default("ALL") @db.Char(3)
+  locale        String    @default("sq-AL")
+  address       String?
+  phone         String?
+  isActive      Boolean   @default(true) @map("is_active")
+  pmsProvider   String?   @map("pms_provider") // schema only, unused Phase 1
+  pmsPropertyId String?   @map("pms_property_id") // schema only
+  pmsConfig     Json?     @map("pms_config") // schema only
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  settings       RestaurantSettings?
+  users          User[]
+  areas          Area[]
+  tables         RestaurantTable[]
+  menuCategories MenuCategory[]
+  menuItems      MenuItem[]
+  modifierGroups ModifierGroup[]
+  orders         Order[]
+  orderItems     OrderItem[]
+  ticketCounters TicketCounter[]
+
+  @@map("venues")
+}
+
+// 1:1 with venues — the single home for every configurable feature. No
+// per-venue env flags, no business rules hardcoded elsewhere.
+model RestaurantSettings {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId String @unique @map("venue_id") @db.Uuid
+  venue   Venue  @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  // auth
+  loginMethod           LoginMethod @default(pin) @map("login_method")
+  pinLength             Int         @default(4) @map("pin_length") @db.SmallInt
+  sessionTimeoutMinutes Int         @default(720) @map("session_timeout_minutes")
+  requirePinOnReopen    Boolean     @default(false) @map("require_pin_on_reopen")
+
+  // tables
+  tableNamingMode       TableNaming @default(number) @map("table_naming_mode")
+  tablesEnabled         Boolean     @default(true) @map("tables_enabled")
+  counterServiceEnabled Boolean     @default(false) @map("counter_service_enabled")
+  ticketNumberPrefix    String      @default("") @map("ticket_number_prefix")
+  ticketNumberReset     String      @default("daily") @map("ticket_number_reset") // 'daily' | 'never'
+  requireTableForOrder  Boolean     @default(true) @map("require_table_for_order")
+  allowTableTransfer    Boolean     @default(true) @map("allow_table_transfer")
+  allowOrderMerge       Boolean     @default(false) @map("allow_order_merge") // flag only, Phase 2 behavior
+
+  // menu / courses
+  coursesEnabled     Boolean @default(true) @map("courses_enabled")
+  defaultCourseCount Int     @default(3) @map("default_course_count") @db.SmallInt
+  modifiersEnabled   Boolean @default(true) @map("modifiers_enabled")
+  allowFreeTextNotes Boolean @default(true) @map("allow_free_text_notes")
+
+  // displays
+  kitchenDisplayEnabled     Boolean @default(true) @map("kitchen_display_enabled")
+  barDisplayEnabled         Boolean @default(false) @map("bar_display_enabled")
+  kitchenPrinterEnabled     Boolean @default(false) @map("kitchen_printer_enabled") // flag only, Phase 2
+  barPrinterEnabled         Boolean @default(false) @map("bar_printer_enabled") // flag only, Phase 2
+  displayAutoRefreshSeconds Int     @default(10) @map("display_auto_refresh_seconds")
+  displayShowElapsedTime    Boolean @default(true) @map("display_show_elapsed_time")
+  displayWarnAfterMinutes   Int     @default(15) @map("display_warn_after_minutes")
+
+  // ordering
+  allowItemVoidAfterSend Boolean @default(false) @map("allow_item_void_after_send")
+  requireReasonOnVoid    Boolean @default(true) @map("require_reason_on_void")
+  autoSendOnAdd          Boolean @default(false) @map("auto_send_on_add")
+
+  // optional integrations, OFF and invisible
+  whatsappEnabled      Boolean @default(false) @map("whatsapp_enabled")
+  whatsappConfig       Json?   @map("whatsapp_config")
+  aiEnabled            Boolean @default(false) @map("ai_enabled")
+  aiConfig             Json?   @map("ai_config")
+  pmsEnabled           Boolean @default(false) @map("pms_enabled")
+  pmsRoomChargeEnabled Boolean @default(false) @map("pms_room_charge_enabled")
+
+  // misc
+  taxRatePercent       Decimal @default(20.00) @map("tax_rate_percent") @db.Decimal(5, 2)
+  serviceChargePercent Decimal @default(0.00) @map("service_charge_percent") @db.Decimal(5, 2)
+  extra                Json    @default("{}") // escape hatch; NO business logic reads this in Phase 1
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("restaurant_settings")
+}
+
+model User {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId          String    @map("venue_id") @db.Uuid
+  venue            Venue     @relation(fields: [venueId], references: [id])
+  fullName         String    @map("full_name")
+  email            String?   @db.Citext
+  passwordHash     String?   @map("password_hash")
+  pinHash          String?   @map("pin_hash")
+  pinLookup        String?   @map("pin_lookup") // HMAC(pin, PIN_PEPPER), never plaintext
+  role             UserRole
+  isActive         Boolean   @default(true) @map("is_active")
+  lastLoginAt      DateTime? @map("last_login_at") @db.Timestamptz
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz
+
+  refreshTokens    RefreshToken[]
+  ordersOpened     Order[]        @relation("OrdersOpenedBy")
+  ordersClosed     Order[]        @relation("OrdersClosedBy")
+  orderItemsAdded  OrderItem[]    @relation("OrderItemsAddedBy")
+  orderItemsVoided OrderItem[]    @relation("OrderItemsVoidedBy")
+  orderEvents      OrderEvent[]
+
+  // Partial uniques (email/pin_lookup NULL-safe) + the password/pin CHECK are
+  // hand-added to the generated migration SQL — Prisma has no declarative
+  // support for either. See docs/SCHEMA.md.
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique @map("token_hash") // sha256
+  deviceLabel String?   @map("device_label")
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("refresh_tokens")
+}
+
+// ── Floor plan ───────────────────────────────────────────────────────────────
+
+model Area {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId            String       @map("venue_id") @db.Uuid
+  venue              Venue        @relation(fields: [venueId], references: [id])
+  name               String
+  sortOrder          Int          @default(0) @map("sort_order")
+  isActive           Boolean      @default(true) @map("is_active")
+  defaultDestination Destination? @map("default_destination")
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz
+
+  tables RestaurantTable[]
+
+  // UNIQUE(venue_id, name) WHERE deleted_at IS NULL — hand-added, partial index.
+  @@map("areas")
+}
+
+// DB table name is "tables" — model named RestaurantTable to avoid the
+// reserved-word confusion with SQL TABLE.
+model RestaurantTable {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId     String      @map("venue_id") @db.Uuid
+  venue       Venue       @relation(fields: [venueId], references: [id])
+  areaId      String?     @map("area_id") @db.Uuid
+  area        Area?       @relation(fields: [areaId], references: [id])
+  tableNumber Int?        @map("table_number")
+  tableName   String?     @map("table_name")
+  seats       Int         @default(2) @db.SmallInt
+  status      TableStatus @default(free)
+  isActive    Boolean     @default(true) @map("is_active")
+  sortOrder   Int         @default(0) @map("sort_order")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt   DateTime?   @map("deleted_at") @db.Timestamptz
+
+  orders Order[]
+
+  // Two partial uniques (table_number / table_name, each WHERE ... AND
+  // deleted_at IS NULL) + CHECK(table_number IS NOT NULL OR table_name IS
+  // NOT NULL) — hand-added. See docs/SCHEMA.md.
+  @@map("tables")
+}
+
+// ── Menu ─────────────────────────────────────────────────────────────────────
+
+model MenuCategory {
+  id                  String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId             String      @map("venue_id") @db.Uuid
+  venue               Venue       @relation(fields: [venueId], references: [id])
+  name                String
+  description         String?
+  defaultDestination  Destination @default(kitchen) @map("default_destination")
+  defaultCourseNumber Int?        @map("default_course_number") @db.SmallInt
+  sortOrder           Int         @default(0) @map("sort_order")
+  isActive            Boolean     @default(true) @map("is_active")
+  colorHex            String?     @map("color_hex") @db.Char(7)
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt           DateTime?   @map("deleted_at") @db.Timestamptz
+
+  menuItems MenuItem[]
+
+  // UNIQUE(venue_id, name) WHERE deleted_at IS NULL — hand-added, partial index.
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId        String       @map("venue_id") @db.Uuid
+  venue          Venue        @relation(fields: [venueId], references: [id])
+  categoryId     String       @map("category_id") @db.Uuid
+  category       MenuCategory @relation(fields: [categoryId], references: [id])
+  name           String
+  description    String?
+  price          Decimal      @db.Decimal(10, 2)
+  destination    Destination
+  courseNumber   Int?         @map("course_number") @db.SmallInt
+  sku            String?
+  isActive       Boolean      @default(true) @map("is_active")
+  isAvailable    Boolean      @default(true) @map("is_available") // the 86 toggle
+  sortOrder      Int          @default(0) @map("sort_order")
+  imageUrl       String?      @map("image_url")
+  prepMinutes    Int?         @map("prep_minutes") @db.SmallInt
+  taxRatePercent Decimal?     @map("tax_rate_percent") @db.Decimal(5, 2) // overrides venue default
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz
+
+  modifierGroups MenuItemModifierGroup[]
+  orderItems     OrderItem[]
+
+  // price >= 0 CHECK is hand-added — Prisma has no declarative CHECK support.
+  @@unique([venueId, sku])
+  @@map("menu_items")
+}
+
+model ModifierGroup {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId    String       @map("venue_id") @db.Uuid
+  venue      Venue        @relation(fields: [venueId], references: [id])
+  name       String
+  type       ModifierType @default(single)
+  isRequired Boolean      @default(false) @map("is_required")
+  minSelect  Int          @default(0) @map("min_select") @db.SmallInt
+  maxSelect  Int?         @map("max_select") @db.SmallInt
+  sortOrder  Int          @default(0) @map("sort_order")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt  DateTime?    @map("deleted_at") @db.Timestamptz
+
+  options       ModifierOption[]
+  menuItemLinks MenuItemModifierGroup[]
+
+  @@map("modifier_groups")
+}
+
+model ModifierOption {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId    String        @map("group_id") @db.Uuid
+  group      ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name       String
+  priceDelta Decimal       @default(0) @map("price_delta") @db.Decimal(10, 2)
+  isActive   Boolean       @default(true) @map("is_active")
+  sortOrder  Int           @default(0) @map("sort_order")
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt  DateTime?     @map("deleted_at") @db.Timestamptz
+
+  orderItemModifiers OrderItemModifier[]
+
+  @@map("modifier_options")
+}
+
+// Pure join table — explicit composite PK given in spec, so no id/timestamps
+// (overrides the blanket id/created_at/updated_at convention for this table only).
+model MenuItemModifierGroup {
+  menuItemId        String        @map("menu_item_id") @db.Uuid
+  menuItem          MenuItem      @relation(fields: [menuItemId], references: [id])
+  groupId           String        @map("group_id") @db.Uuid
+  group             ModifierGroup @relation(fields: [groupId], references: [id])
+  sortOrder         Int           @default(0) @map("sort_order")
+  overridesRequired Boolean?      @map("overrides_required")
+
+  @@id([menuItemId, groupId])
+  @@map("menu_item_modifier_groups")
+}
+
+// ── Orders ───────────────────────────────────────────────────────────────────
+
+model Order {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId            String           @map("venue_id") @db.Uuid
+  venue              Venue            @relation(fields: [venueId], references: [id])
+  orderNumber        Int              @map("order_number")
+  serviceMode        ServiceMode      @map("service_mode")
+  tableId            String?          @map("table_id") @db.Uuid
+  table              RestaurantTable? @relation(fields: [tableId], references: [id])
+  ticketNumber       String?          @map("ticket_number")
+  guestCount         Int?             @map("guest_count") @db.SmallInt
+  customerName       String?          @map("customer_name")
+  status             OrderStatus      @default(draft)
+  openedByUserId     String           @map("opened_by_user_id") @db.Uuid
+  openedByUser       User             @relation("OrdersOpenedBy", fields: [openedByUserId], references: [id])
+  closedByUserId     String?          @map("closed_by_user_id") @db.Uuid
+  closedByUser       User?            @relation("OrdersClosedBy", fields: [closedByUserId], references: [id])
+  openedAt           DateTime         @default(now()) @map("opened_at") @db.Timestamptz
+  firstSentAt        DateTime?        @map("first_sent_at") @db.Timestamptz
+  closedAt           DateTime?        @map("closed_at") @db.Timestamptz
+  cancelledAt        DateTime?        @map("cancelled_at") @db.Timestamptz
+  cancelReason       String?          @map("cancel_reason")
+  subtotal           Decimal          @default(0) @db.Decimal(10, 2)
+  taxTotal           Decimal          @default(0) @map("tax_total") @db.Decimal(10, 2)
+  serviceChargeTotal Decimal          @default(0) @map("service_charge_total") @db.Decimal(10, 2)
+  discountTotal      Decimal          @default(0) @map("discount_total") @db.Decimal(10, 2) // stays 0 in Phase 1
+  grandTotal         Decimal          @default(0) @map("grand_total") @db.Decimal(10, 2)
+  notes              String?
+  pmsFolioId         String?          @map("pms_folio_id") // schema only
+  pmsRoomNumber      String?          @map("pms_room_number") // schema only
+  pmsPostedAt        DateTime?        @map("pms_posted_at") @db.Timestamptz // schema only
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  items  OrderItem[]
+  events OrderEvent[]
+
+  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, and a
+  // partial unique index on table_id (one active order per table) are
+  // hand-added — see docs/SCHEMA.md.
+  @@unique([venueId, orderNumber])
+  @@map("orders")
+}
+
+// Everything snapshotted at insert — menu price changes never touch an
+// existing order.
+model OrderItem {
+  id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId              String          @map("order_id") @db.Uuid
+  order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  venueId              String          @map("venue_id") @db.Uuid // denormalized for display queries
+  venue                Venue           @relation(fields: [venueId], references: [id])
+  menuItemId           String?         @map("menu_item_id") @db.Uuid // reference only
+  menuItem             MenuItem?       @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  itemNameSnapshot     String          @map("item_name_snapshot")
+  categoryNameSnapshot String          @map("category_name_snapshot")
+  unitPriceSnapshot    Decimal         @map("unit_price_snapshot") @db.Decimal(10, 2)
+  destinationSnapshot  Destination     @map("destination_snapshot")
+  courseNumberSnapshot Int?            @map("course_number_snapshot") @db.SmallInt
+  taxRateSnapshot      Decimal         @map("tax_rate_snapshot") @db.Decimal(5, 2)
+  quantity             Int             @db.SmallInt
+  modifiersTotal       Decimal         @default(0) @map("modifiers_total") @db.Decimal(10, 2)
+  lineTotal            Decimal         @map("line_total") @db.Decimal(10, 2)
+  status               OrderItemStatus @default(pending)
+  notes                String?
+  addedByUserId        String          @map("added_by_user_id") @db.Uuid
+  addedByUser          User            @relation("OrderItemsAddedBy", fields: [addedByUserId], references: [id])
+  sentAt               DateTime?       @map("sent_at") @db.Timestamptz
+  preparingAt          DateTime?       @map("preparing_at") @db.Timestamptz
+  readyAt              DateTime?       @map("ready_at") @db.Timestamptz
+  servedAt             DateTime?       @map("served_at") @db.Timestamptz
+  cancelledAt          DateTime?       @map("cancelled_at") @db.Timestamptz
+  cancelReason         String?         @map("cancel_reason")
+  voidByUserId         String?         @map("void_by_user_id") @db.Uuid
+  voidByUser           User?           @relation("OrderItemsVoidedBy", fields: [voidByUserId], references: [id])
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  modifiers OrderItemModifier[]
+  events    OrderEvent[]
+
+  // quantity > 0 CHECK is hand-added.
+  @@index([venueId, destinationSnapshot, status])
+  @@index([orderId])
+  @@index([sentAt])
+  @@map("order_items")
+}
+
+model OrderItemModifier {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderItemId        String          @map("order_item_id") @db.Uuid
+  orderItem          OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifierOptionId   String?         @map("modifier_option_id") @db.Uuid
+  modifierOption     ModifierOption? @relation(fields: [modifierOptionId], references: [id], onDelete: SetNull)
+  groupNameSnapshot  String          @map("group_name_snapshot")
+  optionNameSnapshot String          @map("option_name_snapshot")
+  priceDeltaSnapshot Decimal         @map("price_delta_snapshot") @db.Decimal(10, 2)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("order_item_modifiers")
+}
+
+// Append-only audit log — one row per order state change, never updated.
+// venue_id is intentionally a plain denormalized column here, not a FK
+// relation (unlike order_items.venue_id) — matches the spec exactly.
+model OrderEvent {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId     String     @map("venue_id") @db.Uuid
+  orderId     String     @map("order_id") @db.Uuid
+  order       Order      @relation(fields: [orderId], references: [id])
+  orderItemId String?    @map("order_item_id") @db.Uuid
+  orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
+  eventType   String     @map("event_type")
+  actorUserId String?    @map("actor_user_id") @db.Uuid
+  actorUser   User?      @relation(fields: [actorUserId], references: [id])
+  payload     Json       @default("{}")
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("order_events")
+}
+
+// Explicit composite PK given in spec — no id, no timestamps.
+model TicketCounter {
+  venueId          String   @map("venue_id") @db.Uuid
+  venue            Venue    @relation(fields: [venueId], references: [id])
+  businessDate     DateTime @map("business_date") @db.Date
+  lastTicketNumber Int      @default(0) @map("last_ticket_number")
+  lastOrderNumber  Int      @default(0) @map("last_order_number")
+
+  @@id([venueId, businessDate])
+  @@map("ticket_counters")
+}

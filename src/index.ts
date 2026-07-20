@@ -3,7 +3,6 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import { runMigrations } from './db/migrate';
 import { authRouter } from './routes/auth';
 import { tablesRouter } from './routes/tables';
 import { menuRouter } from './routes/menu';
@@ -30,11 +29,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   sendError(res, 'INTERNAL_ERROR', 'Internal server error');
 });
 
-async function start() {
-  await runMigrations();
-  app.listen(Number(PORT), () => {
-    console.log(`happy-backend running at http://localhost:${PORT}`);
-  });
-}
-
-start().catch(err => { console.error(err); process.exit(1); });
+// Migrations are applied via `npx prisma migrate deploy` (or `migrate dev`
+// locally) as a separate step — not run automatically on boot.
+app.listen(Number(PORT), () => {
+  console.log(`happy-backend running at http://localhost:${PORT}`);
+});
