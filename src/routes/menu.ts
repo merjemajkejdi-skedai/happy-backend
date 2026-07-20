@@ -3,13 +3,11 @@ import { randomUUID } from 'crypto';
 import { query, queryOne } from '../db/connection';
 import { requireAuth } from '../middleware/auth';
 import { roleGuard } from '../middleware/roleGuard';
+import { sendData, sendError } from '../lib/response';
 import type { MenuCategory, MenuItem } from '../types';
 
 export const menuRouter = Router();
 menuRouter.use(requireAuth);
-
-const ok  = <T>(res: Response, data: T) => res.json({ success: true, data });
-const err = (res: Response, message: string, status = 400) => res.status(status).json({ success: false, error: message });
 
 const DESTINATIONS = ['kitchen', 'bar', 'printer'];
 
@@ -21,14 +19,14 @@ menuRouter.get('/categories', async (req: Request, res: Response) => {
       'SELECT * FROM menu_categories WHERE venue_id = $1 AND is_active = TRUE ORDER BY sort_order ASC, name ASC',
       [req.user!.venueId],
     );
-    ok(res, rows);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, rows, { count: rows.length });
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.post('/categories', roleGuard('admin'), async (req: Request, res: Response) => {
   const { name, description, destination = 'kitchen', sort_order = 0 } = req.body ?? {};
-  if (!name?.trim()) return err(res, 'name is required');
-  if (!DESTINATIONS.includes(destination)) return err(res, `destination must be one of: ${DESTINATIONS.join(', ')}`);
+  if (!name?.trim()) return sendError(res, 'VALIDATION_ERROR', 'name is required');
+  if (!DESTINATIONS.includes(destination)) return sendError(res, 'VALIDATION_ERROR', `destination must be one of: ${DESTINATIONS.join(', ')}`);
   try {
     const id = randomUUID();
     await query(
@@ -37,17 +35,17 @@ menuRouter.post('/categories', roleGuard('admin'), async (req: Request, res: Res
       [id, req.user!.venueId, name.trim(), description ?? null, destination, Number(sort_order)],
     );
     const row = await queryOne<MenuCategory>('SELECT * FROM menu_categories WHERE id = $1', [id]);
-    ok(res, row);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, row);
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.put('/categories/:id', roleGuard('admin'), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name, description, destination, sort_order } = req.body ?? {};
-  if (destination && !DESTINATIONS.includes(destination)) return err(res, `destination must be one of: ${DESTINATIONS.join(', ')}`);
+  if (destination && !DESTINATIONS.includes(destination)) return sendError(res, 'VALIDATION_ERROR', `destination must be one of: ${DESTINATIONS.join(', ')}`);
   try {
     const existing = await queryOne('SELECT id FROM menu_categories WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
-    if (!existing) return err(res, 'Category not found', 404);
+    if (!existing) return sendError(res, 'NOT_FOUND', 'Category not found');
     await query(
       `UPDATE menu_categories SET
         name = COALESCE($1, name), description = COALESCE($2, description),
@@ -56,18 +54,18 @@ menuRouter.put('/categories/:id', roleGuard('admin'), async (req: Request, res: 
       [name?.trim() ?? null, description ?? null, destination ?? null, sort_order != null ? Number(sort_order) : null, id],
     );
     const row = await queryOne<MenuCategory>('SELECT * FROM menu_categories WHERE id = $1', [id]);
-    ok(res, row);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, row);
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.delete('/categories/:id', roleGuard('admin'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const existing = await queryOne('SELECT id FROM menu_categories WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
-    if (!existing) return err(res, 'Category not found', 404);
+    if (!existing) return sendError(res, 'NOT_FOUND', 'Category not found');
     await query('UPDATE menu_categories SET is_active = FALSE, updated_at = NOW() WHERE id = $1', [id]);
-    ok(res, { deleted: true });
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, { deleted: true });
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 // ── Items ────────────────────────────────────────────────────────────────────
@@ -84,19 +82,19 @@ menuRouter.get('/items', async (req: Request, res: Response) => {
           'SELECT * FROM menu_items WHERE venue_id = $1 AND is_active = TRUE ORDER BY sort_order ASC, name ASC',
           [req.user!.venueId],
         );
-    ok(res, rows);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, rows, { count: rows.length });
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.post('/items', roleGuard('admin'), async (req: Request, res: Response) => {
   const { category_id, name, description, price, destination_override, course, sort_order = 0 } = req.body ?? {};
-  if (!category_id) return err(res, 'category_id is required');
-  if (!name?.trim()) return err(res, 'name is required');
-  if (price == null || Number.isNaN(Number(price)) || Number(price) < 0) return err(res, 'price must be a non-negative number');
-  if (destination_override && !DESTINATIONS.includes(destination_override)) return err(res, `destination_override must be one of: ${DESTINATIONS.join(', ')}`);
+  if (!category_id) return sendError(res, 'VALIDATION_ERROR', 'category_id is required');
+  if (!name?.trim()) return sendError(res, 'VALIDATION_ERROR', 'name is required');
+  if (price == null || Number.isNaN(Number(price)) || Number(price) < 0) return sendError(res, 'VALIDATION_ERROR', 'price must be a non-negative number');
+  if (destination_override && !DESTINATIONS.includes(destination_override)) return sendError(res, 'VALIDATION_ERROR', `destination_override must be one of: ${DESTINATIONS.join(', ')}`);
   try {
     const category = await queryOne('SELECT id FROM menu_categories WHERE id = $1 AND venue_id = $2', [category_id, req.user!.venueId]);
-    if (!category) return err(res, 'Category not found', 404);
+    if (!category) return sendError(res, 'NOT_FOUND', 'Category not found');
     const id = randomUUID();
     await query(
       `INSERT INTO menu_items (id, venue_id, category_id, name, description, price, destination_override, course, sort_order)
@@ -105,20 +103,20 @@ menuRouter.post('/items', roleGuard('admin'), async (req: Request, res: Response
        destination_override ?? null, course ?? null, Number(sort_order)],
     );
     const row = await queryOne<MenuItem>('SELECT * FROM menu_items WHERE id = $1', [id]);
-    ok(res, row);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, row);
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.put('/items/:id', roleGuard('admin'), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { category_id, name, description, price, destination_override, course, sort_order } = req.body ?? {};
-  if (destination_override && !DESTINATIONS.includes(destination_override)) return err(res, `destination_override must be one of: ${DESTINATIONS.join(', ')}`);
+  if (destination_override && !DESTINATIONS.includes(destination_override)) return sendError(res, 'VALIDATION_ERROR', `destination_override must be one of: ${DESTINATIONS.join(', ')}`);
   try {
-    const existing = await queryOne('SELECT * FROM menu_items WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
-    if (!existing) return err(res, 'Item not found', 404);
+    const existing = await queryOne<MenuItem>('SELECT * FROM menu_items WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
+    if (!existing) return sendError(res, 'NOT_FOUND', 'Item not found');
     if (category_id) {
       const category = await queryOne('SELECT id FROM menu_categories WHERE id = $1 AND venue_id = $2', [category_id, req.user!.venueId]);
-      if (!category) return err(res, 'Category not found', 404);
+      if (!category) return sendError(res, 'NOT_FOUND', 'Category not found');
     }
     await query(
       `UPDATE menu_items SET
@@ -127,35 +125,35 @@ menuRouter.put('/items/:id', roleGuard('admin'), async (req: Request, res: Respo
         updated_at = NOW()
        WHERE id = $8`,
       [category_id ?? null, name?.trim() ?? null, description ?? null, price != null ? Number(price) : null,
-       destination_override !== undefined ? destination_override : (existing as any).destination_override,
-       course !== undefined ? course : (existing as any).course,
+       destination_override !== undefined ? destination_override : existing.destination_override,
+       course !== undefined ? course : existing.course,
        sort_order != null ? Number(sort_order) : null, id],
     );
     const row = await queryOne<MenuItem>('SELECT * FROM menu_items WHERE id = $1', [id]);
-    ok(res, row);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, row);
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 // Toggle availability mid-service ("86" an item) — manager + admin.
 menuRouter.put('/items/:id/availability', roleGuard('manager', 'admin'), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { is_available } = req.body ?? {};
-  if (typeof is_available !== 'boolean') return err(res, 'is_available (boolean) is required');
+  if (typeof is_available !== 'boolean') return sendError(res, 'VALIDATION_ERROR', 'is_available (boolean) is required');
   try {
     const existing = await queryOne('SELECT id FROM menu_items WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
-    if (!existing) return err(res, 'Item not found', 404);
+    if (!existing) return sendError(res, 'NOT_FOUND', 'Item not found');
     await query('UPDATE menu_items SET is_available = $1, updated_at = NOW() WHERE id = $2', [is_available, id]);
     const row = await queryOne<MenuItem>('SELECT * FROM menu_items WHERE id = $1', [id]);
-    ok(res, row);
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, row);
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });
 
 menuRouter.delete('/items/:id', roleGuard('admin'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const existing = await queryOne('SELECT id FROM menu_items WHERE id = $1 AND venue_id = $2', [id, req.user!.venueId]);
-    if (!existing) return err(res, 'Item not found', 404);
+    if (!existing) return sendError(res, 'NOT_FOUND', 'Item not found');
     await query('UPDATE menu_items SET is_active = FALSE, updated_at = NOW() WHERE id = $1', [id]);
-    ok(res, { deleted: true });
-  } catch (e) { err(res, (e as Error).message, 500); }
+    sendData(res, { deleted: true });
+  } catch (e) { sendError(res, 'INTERNAL_ERROR', (e as Error).message); }
 });

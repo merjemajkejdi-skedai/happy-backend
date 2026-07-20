@@ -10,6 +10,14 @@ export interface Venue {
   code: string;
   name: string;
   venue_type: VenueType;
+  created_at: string;
+  updated_at: string;
+}
+
+// Every configurable feature lives here — never on venues, never in .env.
+export interface RestaurantSettings {
+  id: string;
+  venue_id: string;
   currency: string;
   timezone: string;
   counter_service_enabled: boolean;
@@ -18,6 +26,9 @@ export interface Venue {
   bar_display_enabled: boolean;
   default_item_destination: Destination;
   waiter_login_method: 'pin' | 'email' | 'both';
+  whatsapp_enabled: boolean;
+  ai_enabled: boolean;
+  pms_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -123,6 +134,18 @@ export interface KitchenEvent {
   items: KitchenEventItem[];
   is_acknowledged: boolean;
   acknowledged_at: string | null;
+  created_at: string;
+}
+
+// Append-only audit trail — one row per order state change. Never updated
+// or deleted by application code.
+export interface OrderEvent {
+  id: string;
+  order_id: string;
+  venue_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_by: string | null;
   created_at: string;
 }
 

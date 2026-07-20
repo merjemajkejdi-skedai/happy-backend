@@ -2,12 +2,10 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { query, queryOne } from '../db/connection';
 import { signToken } from '../middleware/auth';
-import type { Venue, Staff } from '../types';
+import { sendData, sendError } from '../lib/response';
+import type { Venue, Staff, RestaurantSettings } from '../types';
 
 export const authRouter = Router();
-
-const ok  = <T>(res: Response, data: T) => res.json({ success: true, data });
-const err = (res: Response, message: string, status = 400) => res.status(status).json({ success: false, error: message });
 
 // POST /auth/login
 // Body: { code, pin?, email? }
@@ -16,12 +14,12 @@ const err = (res: Response, message: string, status = 400) => res.status(status)
 // for a pin match — a normal PIN-pad login on a shared POS terminal.
 authRouter.post('/login', async (req: Request, res: Response) => {
   const { code, pin, email } = req.body ?? {};
-  if (!code?.trim()) return err(res, 'code is required');
-  if (!pin?.trim() && !email?.trim()) return err(res, 'pin (and/or email) is required');
+  if (!code?.trim()) return sendError(res, 'VALIDATION_ERROR', 'code is required');
+  if (!pin?.trim() && !email?.trim()) return sendError(res, 'VALIDATION_ERROR', 'pin (and/or email) is required');
 
   try {
     const venue = await queryOne<Venue>('SELECT * FROM venues WHERE code = $1', [String(code).trim().toLowerCase()]);
-    if (!venue) return err(res, 'Venue not found', 401);
+    if (!venue) return sendError(res, 'UNAUTHORIZED', 'Venue not found');
 
     let staff: Staff | undefined;
 
@@ -45,19 +43,33 @@ authRouter.post('/login', async (req: Request, res: Response) => {
       }
     }
 
-    if (!staff) return err(res, 'Invalid credentials', 401);
+    if (!staff) return sendError(res, 'UNAUTHORIZED', 'Invalid credentials');
 
     const token = signToken({ staffId: staff.id, venueId: venue.id, venueType: venue.venue_type, role: staff.role });
+    const settings = await queryOne<RestaurantSettings>('SELECT * FROM restaurant_settings WHERE venue_id = $1', [venue.id]);
 
-    ok(res, {
+    sendData(res, {
       token,
       staff: { id: staff.id, name: staff.name, role: staff.role },
-      venue: { id: venue.id, code: venue.code, name: venue.name, venue_type: venue.venue_type },
+      venue: {
+        id: venue.id,
+        code: venue.code,
+        name: venue.name,
+        venue_type: venue.venue_type,
+        currency: settings?.currency ?? 'EUR',
+        counter_service_enabled: settings?.counter_service_enabled ?? false,
+        kitchen_display_enabled: settings?.kitchen_display_enabled ?? false,
+        bar_display_enabled: settings?.bar_display_enabled ?? false,
+        // Optional bolt-ons: omitted entirely while disabled, not sent as false.
+        ...(settings?.whatsapp_enabled ? { whatsapp_enabled: true } : {}),
+        ...(settings?.ai_enabled ? { ai_enabled: true } : {}),
+        ...(settings?.pms_enabled ? { pms_enabled: true } : {}),
+      },
     });
   } catch (e) {
-    err(res, (e as Error).message, 500);
+    sendError(res, 'INTERNAL_ERROR', (e as Error).message);
   }
 });
 
 // Stateless JWT — nothing to invalidate server-side.
-authRouter.post('/logout', (_req: Request, res: Response) => ok(res, { loggedOut: true }));
+authRouter.post('/logout', (_req: Request, res: Response) => sendData(res, { loggedOut: true }));

@@ -24,14 +24,19 @@ async function seedVenue(v: SeedVenue) {
     return;
   }
 
-  const isBar = v.venue_type === 'happy_bar';
   const venue = await queryOne<{ id: string }>(
-    `INSERT INTO venues (code, name, venue_type, counter_service_enabled, send_by_course, kitchen_display_enabled, bar_display_enabled)
-     VALUES ($1, $2, $3, $4, FALSE, $5, $6)
-     RETURNING id`,
-    [v.code, v.name, v.venue_type, isBar, !isBar, v.venue_type !== 'happy_restaurant'],
+    `INSERT INTO venues (code, name, venue_type) VALUES ($1, $2, $3) RETURNING id`,
+    [v.code, v.name, v.venue_type],
   );
   if (!venue) throw new Error(`failed to create venue ${v.code}`);
+
+  // Every configurable behavior lives in restaurant_settings, never on venues.
+  const isBar = v.venue_type === 'happy_bar';
+  await query(
+    `INSERT INTO restaurant_settings (venue_id, counter_service_enabled, send_by_course, kitchen_display_enabled, bar_display_enabled)
+     VALUES ($1, $2, FALSE, $3, $4)`,
+    [venue.id, isBar, !isBar, v.venue_type !== 'happy_restaurant'],
+  );
 
   const pinHash = await bcrypt.hash(v.pin, 10);
   await query(

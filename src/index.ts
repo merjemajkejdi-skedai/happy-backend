@@ -9,6 +9,7 @@ import { tablesRouter } from './routes/tables';
 import { menuRouter } from './routes/menu';
 import { ordersRouter } from './routes/orders';
 import { kitchenRouter } from './routes/kitchen';
+import { sendError } from './lib/response';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,7 +27,7 @@ app.use('/', kitchenRouter); // exposes /kitchen/events, /bar/events, /order-ite
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
-  res.status(500).json({ success: false, error: 'Internal server error' });
+  sendError(res, 'INTERNAL_ERROR', 'Internal server error');
 });
 
 async function start() {

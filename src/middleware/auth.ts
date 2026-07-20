@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { queryOne } from '../db/connection';
+import { sendError } from '../lib/response';
 import type { AuthTokenPayload } from '../types';
 
 function jwtSecret(): string {
@@ -16,7 +17,7 @@ export function signToken(payload: AuthTokenPayload): string {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, error: 'No token provided' });
+    return sendError(res, 'UNAUTHORIZED', 'No token provided');
   }
 
   try {
@@ -25,12 +26,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       'SELECT id, name, role, is_active FROM staff WHERE id = $1 AND venue_id = $2',
       [decoded.staffId, decoded.venueId],
     );
-    if (!staff) return res.status(401).json({ success: false, error: 'Staff not found' });
-    if (!staff.is_active) return res.status(401).json({ success: false, error: 'Account deactivated' });
+    if (!staff) return sendError(res, 'UNAUTHORIZED', 'Staff not found');
+    if (!staff.is_active) return sendError(res, 'UNAUTHORIZED', 'Account deactivated');
 
     req.user = { ...decoded, name: staff.name };
     next();
   } catch {
-    return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+    return sendError(res, 'UNAUTHORIZED', 'Invalid or expired token');
   }
 }
