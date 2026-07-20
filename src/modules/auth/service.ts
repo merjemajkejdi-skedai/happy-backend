@@ -5,6 +5,7 @@ import { pinLookup } from '../../shared/pin';
 import { LOGIN_LOCKOUT_THRESHOLD, LOGIN_LOCKOUT_MINUTES } from '../../shared/config';
 import { signAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from './tokens';
 import { serializeSettings } from '../../shared/settingsSerializer';
+import { serializeUser } from '../../shared/userSerializer';
 import type { User, Venue, RestaurantSettings } from '../../generated/prisma/client';
 
 export type LoginError =
@@ -130,10 +131,7 @@ export async function getMe(userId: string, venueId: string): Promise<MeResult |
   const settings = await prisma.restaurantSettings.findUnique({ where: { venueId } });
   if (!venue || !settings) return null;
 
-  const { passwordHash, pinHash, pinLookup: _pinLookup, ...safeUser } = user;
-  void passwordHash; void pinHash; void _pinLookup;
-
-  return { user: safeUser, venue, settings: serializeSettings(settings) };
+  return { user: serializeUser(user), venue, settings: serializeSettings(settings) };
 }
 
 export interface VenueConfig {

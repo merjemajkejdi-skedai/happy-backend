@@ -16,7 +16,8 @@ export type Permission =
   | 'table.write'
   | 'table.status'
   | 'menu.availability'
-  | 'order.events.read';
+  | 'order.events.read'
+  | 'venue.write';
 
 // Phase 1 only defines permissions for waiter/kitchen/admin — those are the
 // only roles with routes. manager and bar exist in the UserRole enum for
@@ -45,6 +46,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     'table.status',
     'menu.availability',
     'order.events.read',
+    'venue.write',
   ]),
   manager: new Set<Permission>(),
   bar: new Set<Permission>(),
