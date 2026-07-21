@@ -10,6 +10,7 @@ import { usersRouter } from './modules/users/routes';
 import { areasRouter } from './modules/areas/routes';
 import { tablesRouter } from './modules/tables/routes';
 import { menuRouter } from './modules/menu/routes';
+import { ordersRouter } from './modules/orders/routes';
 import { sendError } from './lib/response';
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/areas', areasRouter);
 app.use('/api/v1/tables', tablesRouter);
 app.use('/api/v1/menu', menuRouter);
+app.use('/api/v1/orders', ordersRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

@@ -430,15 +430,17 @@ model Order {
   pmsFolioId         String?          @map("pms_folio_id") // schema only
   pmsRoomNumber      String?          @map("pms_room_number") // schema only
   pmsPostedAt        DateTime?        @map("pms_posted_at") @db.Timestamptz // schema only
+  idempotencyKey     String?          @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per venue
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   items  OrderItem[]
   events OrderEvent[]
 
-  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, and a
-  // partial unique index on table_id (one active order per table) are
-  // hand-added — see docs/SCHEMA.md.
+  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, a
+  // partial unique index on table_id (one active order per table), and a
+  // partial unique index on (venue_id, idempotency_key) are hand-added — see
+  // docs/SCHEMA.md.
   @@unique([venueId, orderNumber])
   @@map("orders")
 }
@@ -474,13 +476,15 @@ model OrderItem {
   cancelReason         String?         @map("cancel_reason")
   voidByUserId         String?         @map("void_by_user_id") @db.Uuid
   voidByUser           User?           @relation("OrderItemsVoidedBy", fields: [voidByUserId], references: [id])
+  idempotencyKey       String?         @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per order
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   modifiers OrderItemModifier[]
   events    OrderEvent[]
 
-  // quantity > 0 CHECK is hand-added.
+  // quantity > 0 CHECK, and a partial unique index on (order_id,
+  // idempotency_key), are hand-added.
   @@index([venueId, destinationSnapshot, status])
   @@index([orderId])
   @@index([sentAt])

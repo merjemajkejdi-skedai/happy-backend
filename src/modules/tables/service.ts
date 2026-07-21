@@ -3,7 +3,9 @@ import { prisma } from '../../db/prisma';
 import { Prisma, type RestaurantTable, type TableStatus, type TableNaming, type OrderStatus } from '../../generated/prisma/client';
 
 // Matches the partial unique index on orders(table_id) — see docs/SCHEMA.md.
-const ACTIVE_ORDER_STATUSES: OrderStatus[] = ['draft', 'open', 'sent', 'partially_served', 'served'];
+// Exported for reuse by the orders module (same statuses guard table
+// occupancy there).
+export const ACTIVE_ORDER_STATUSES: OrderStatus[] = ['draft', 'open', 'sent', 'partially_served', 'served'];
 const MAX_BULK_RANGE = 500; // defensive cap — not spec'd, just guards against an absurd request
 
 export interface TableDomainError {

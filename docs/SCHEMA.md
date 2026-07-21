@@ -93,6 +93,7 @@ schema-drift resolution.
 - **`order_items_quantity_check`** — `quantity > 0`.
 - **`orders_service_mode_check`** — `(service_mode = 'table' AND table_id IS NOT NULL) OR (service_mode = 'counter' AND ticket_number IS NOT NULL)`. A table-service order must reference a table; a counter-service order must have a ticket number. One or the other, never neither, never a mismatch.
 - **`orders_active_table_key`** — partial unique index on `orders(table_id)`, `WHERE table_id IS NOT NULL AND status IN ('draft', 'open', 'sent', 'partially_served', 'served')`. This is the DB-level guarantee that a table can have at most one *active* order at a time — once an order reaches `closed` or `cancelled`, the table frees up and a new order can be opened against it. Without the `status IN (...)` filter this would incorrectly block re-opening a table after a previous order closed.
+- **`orders_venue_id_idempotency_key_key`**, **`order_items_order_id_idempotency_key_key`** — partial unique indexes, `WHERE idempotency_key IS NOT NULL`, added in the orders-core migration. Back the `Idempotency-Key` header on `POST /orders` (scoped per venue) and `POST /orders/:id/items` (scoped per order): a retried request with the same key hits this constraint, which the route layer catches and turns into "return the original resource" instead of a duplicate.
 
 ## What's deliberately not enforced yet
 
