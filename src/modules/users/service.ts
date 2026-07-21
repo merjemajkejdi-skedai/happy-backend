@@ -168,7 +168,13 @@ export async function softDeleteUser(venueId: string, actorUserId: string, userI
   const user = await scopedPrisma.user.findFirst({ where: { id: userId, venueId, deletedAt: null } });
   if (!user) return { ok: false, error: err(404, 'NOT_FOUND', 'User not found') };
 
-  await scopedPrisma.user.update({ where: { id: userId }, data: { deletedAt: new Date(), isActive: false } });
+  // email/pin_lookup back partial-unique indexes that don't exclude deleted
+  // rows (WHERE email/pin_lookup IS NOT NULL only) — clearing them here is
+  // what actually frees the identifier for reuse by a future hire.
+  await scopedPrisma.user.update({
+    where: { id: userId },
+    data: { deletedAt: new Date(), isActive: false, email: null, pinLookup: null },
+  });
   return { ok: true, value: null };
 }
 
