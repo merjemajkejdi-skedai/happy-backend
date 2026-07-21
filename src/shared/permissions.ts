@@ -20,6 +20,7 @@ export type Permission =
   | 'table.write'
   | 'table.status'
   | 'menu.availability'
+  | 'display.view'
   | 'order.events.read'
   | 'venue.write';
 
@@ -39,6 +40,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
   ]),
   kitchen: new Set<Permission>([
     'display.bump',
+    'display.view',
     'menu.availability', // kitchen is the other side of the same real-time signal
   ]),
   admin: new Set<Permission>([
@@ -56,6 +58,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     'table.write',
     'table.status',
     'menu.availability',
+    'display.view',
     'order.events.read',
     'venue.write',
   ]),

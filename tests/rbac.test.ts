@@ -5,7 +5,7 @@ import type { Response } from 'express';
 
 const ALL_PERMISSIONS: Permission[] = [
   'order.create', 'order.send', 'order.transfer', 'order.serve', 'order.close',
-  'order.void_after_send', 'order.cancel_sent', 'display.bump',
+  'order.void_after_send', 'order.cancel_sent', 'display.bump', 'display.view',
   'settings.write', 'user.manage', 'menu.write', 'table.write',
   'table.status', 'menu.availability', 'order.events.read', 'venue.write',
 ];
