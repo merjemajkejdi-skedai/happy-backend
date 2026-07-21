@@ -2,7 +2,8 @@ import { scopedPrisma } from '../../middleware/venueScope';
 import { prisma } from '../../db/prisma';
 import { err, getVenueAndSettings, type OrderDomainError } from './validation';
 import { validateCourseNumber } from '../menu/validation';
-import { recomputeOrderTotals } from './ordersService';
+import { recomputeOrder } from './ordersService';
+import { sendItemsCore } from './lifecycleService';
 import {
   Prisma,
   type OrderItem,
@@ -192,19 +193,13 @@ export async function addItem(
         },
       });
 
-      // TODO(prompt-8): once the shared "send to kitchen/bar" service
-      // exists, auto_send_on_add should call it here — it should also flip
-      // order.status to 'sent', set first_sent_at, and emit the proper send
-      // audit event. For now this only flips the item's own status so the
-      // flag is functional rather than silently ignored; replace this block
-      // with a call into that service once it lands.
-      let finalItem = created;
       if (settings.autoSendOnAdd) {
-        finalItem = await tx.orderItem.update({ where: { id: created.id }, data: { status: 'sent', sentAt: new Date() } });
+        await sendItemsCore(tx, venueId, orderId, actorUserId, [created.id]);
+      } else {
+        await recomputeOrder(tx, venueId, orderId);
       }
 
-      await recomputeOrderTotals(tx, venueId, orderId);
-
+      const finalItem = await tx.orderItem.findUniqueOrThrow({ where: { id: created.id } });
       const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: created.id } });
       return { ...finalItem, modifiers };
     });
@@ -308,7 +303,7 @@ export async function updateItem(
       data: { venueId, orderId, orderItemId: itemId, eventType: 'item.updated', actorUserId, payload: { before, after } },
     });
 
-    await recomputeOrderTotals(tx, venueId, orderId);
+    await recomputeOrder(tx, venueId, orderId);
 
     const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: itemId } });
     return { ...updatedItem, modifiers };
@@ -370,7 +365,7 @@ export async function voidItem(
       },
     });
 
-    await recomputeOrderTotals(tx, venueId, orderId);
+    await recomputeOrder(tx, venueId, orderId);
   });
 
   return { ok: true, value: null };

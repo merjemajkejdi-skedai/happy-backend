@@ -4,9 +4,10 @@ import { requirePermission } from '../src/middleware/rbac';
 import type { Response } from 'express';
 
 const ALL_PERMISSIONS: Permission[] = [
-  'order.create', 'order.send', 'order.void_after_send', 'display.bump',
+  'order.create', 'order.send', 'order.transfer', 'order.serve', 'order.close',
+  'order.void_after_send', 'order.cancel_sent', 'display.bump',
   'settings.write', 'user.manage', 'menu.write', 'table.write',
-  'table.status', 'menu.availability', 'order.events.read',
+  'table.status', 'menu.availability', 'order.events.read', 'venue.write',
 ];
 
 describe('permission registry', () => {

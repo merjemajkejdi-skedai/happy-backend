@@ -520,6 +520,7 @@ model OrderEvent {
   actorUserId String?    @map("actor_user_id") @db.Uuid
   actorUser   User?      @relation(fields: [actorUserId], references: [id])
   payload     Json       @default("{}")
+  idempotencyKey String? @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per order — only POST /orders/:id/send uses this so far
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("order_events")

@@ -8,7 +8,11 @@ import type { UserRole } from '../generated/prisma/client';
 export type Permission =
   | 'order.create'
   | 'order.send'
+  | 'order.transfer'
+  | 'order.serve'
+  | 'order.close'
   | 'order.void_after_send'
+  | 'order.cancel_sent'
   | 'display.bump'
   | 'settings.write'
   | 'user.manage'
@@ -27,6 +31,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
   waiter: new Set<Permission>([
     'order.create',
     'order.send',
+    'order.transfer', // moving a table/counter order is routine front-of-house work
+    'order.serve',
+    'order.close', // no payment handling in Phase 1 — closing is just a state change
     'table.status',
     'menu.availability', // front-of-house is often first to spot a stock-out
   ]),
@@ -37,7 +44,11 @@ export const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
   admin: new Set<Permission>([
     'order.create',
     'order.send',
+    'order.transfer',
+    'order.serve',
+    'order.close',
     'order.void_after_send', // voiding a sent item is a supervisory action
+    'order.cancel_sent', // cancelling an order after anything was sent is a supervisory action
     'display.bump',
     'settings.write',
     'user.manage',

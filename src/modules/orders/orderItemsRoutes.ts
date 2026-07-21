@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
 import * as orderItemsService from './orderItemsService';
+import * as lifecycleService from './lifecycleService';
 import { serializeOrderItem } from './serializers';
 
 // mergeParams: true — this router is mounted at /orders/:id/items, and needs
@@ -56,4 +57,10 @@ orderItemsRouter.delete('/:itemId', requirePermission('order.create'), async (re
   );
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
   sendData(res, { deleted: true });
+});
+
+orderItemsRouter.patch('/:itemId/serve', requirePermission('order.serve'), async (req: Request, res: Response) => {
+  const result = await lifecycleService.serveItem(req.auth!.venueId, req.auth!.userId, req.params.id, req.params.itemId);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, { served: true });
 });

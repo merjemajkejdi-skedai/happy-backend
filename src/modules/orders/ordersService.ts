@@ -3,9 +3,11 @@ import { prisma } from '../../db/prisma';
 import { computeDisplayLabel } from '../tables/service';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { allocateNumbers, formatTicketNumber } from './ticketNumbering';
+import { deriveOrderStatus, type ExplicitOrderFlag } from './statusMachine';
 import {
   Prisma,
   type Order,
+  type OrderEvent,
   type OrderItem,
   type OrderItemModifier,
   type OrderStatus,
@@ -18,17 +20,29 @@ function isConflict(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 }
 
-// ── Totals — server-side, Decimal-only math, recomputed and persisted on
-// every mutation that can affect them. Shared by ordersService and
-// orderItemsService so there is exactly one place this formula lives.
-export async function recomputeOrderTotals(tx: Tx, venueId: string, orderId: string): Promise<Order> {
-  const items = await tx.orderItem.findMany({ where: { orderId, venueId, status: { not: 'cancelled' } } });
+// ── Totals + status — server-side, Decimal-only math, recomputed and
+// persisted on every mutation that can affect them. Shared by ordersService,
+// orderItemsService, and lifecycleService so there is exactly one place
+// either the totals formula or the status derivation lives — no scattered
+// status assignments anywhere else in this module.
+//
+// explicitFlag/extraData let close/cancel fold their own lifecycle fields
+// (closed_at, closed_by_user_id, ...) into this same update instead of
+// issuing a second write.
+export async function recomputeOrder(
+  tx: Tx,
+  venueId: string,
+  orderId: string,
+  options?: { explicitFlag?: ExplicitOrderFlag; extraData?: Prisma.OrderUncheckedUpdateInput },
+): Promise<Order> {
+  const items = await tx.orderItem.findMany({ where: { orderId, venueId } });
   const settings = await tx.restaurantSettings.findUnique({ where: { venueId } });
   if (!settings) throw new Error(`restaurant_settings missing for venue ${venueId}`);
 
   let subtotal = new Prisma.Decimal(0);
   let taxTotal = new Prisma.Decimal(0);
   for (const item of items) {
+    if (item.status === 'cancelled') continue;
     subtotal = subtotal.plus(item.lineTotal);
     taxTotal = taxTotal.plus(item.lineTotal.times(item.taxRateSnapshot).dividedBy(100));
   }
@@ -36,9 +50,11 @@ export async function recomputeOrderTotals(tx: Tx, venueId: string, orderId: str
   const discountTotal = new Prisma.Decimal(0); // stays 0 in Phase 1
   const grandTotal = subtotal.plus(taxTotal).plus(serviceChargeTotal).minus(discountTotal);
 
+  const status = deriveOrderStatus(items, options?.explicitFlag);
+
   return tx.order.update({
     where: { id: orderId },
-    data: { subtotal, taxTotal, serviceChargeTotal, discountTotal, grandTotal },
+    data: { subtotal, taxTotal, serviceChargeTotal, discountTotal, grandTotal, status, ...options?.extraData },
   });
 }
 
@@ -265,4 +281,40 @@ export async function updateOrder(
   }
 
   return { ok: true, value: updated };
+}
+
+// ── Events ───────────────────────────────────────────────────────────────────
+
+export interface OrderEventWithActor extends OrderEvent {
+  actorName: string | null;
+}
+
+export interface ListOrderEventsParams {
+  page?: number;
+  limit?: number;
+}
+
+export async function listOrderEvents(venueId: string, orderId: string, params: ListOrderEventsParams) {
+  const order = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
+  if (!order) return null;
+
+  const page = Math.max(1, params.page ?? 1);
+  const limit = Math.min(100, Math.max(1, params.limit ?? 50));
+
+  const [events, total] = await Promise.all([
+    prisma.orderEvent.findMany({
+      where: { orderId, venueId },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.orderEvent.count({ where: { orderId, venueId } }),
+  ]);
+
+  const actorIds = [...new Set(events.map(e => e.actorUserId).filter((id): id is string => !!id))];
+  const actors = actorIds.length ? await prisma.user.findMany({ where: { id: { in: actorIds } } }) : [];
+  const nameById = new Map(actors.map(a => [a.id, a.fullName]));
+
+  const withActor: OrderEventWithActor[] = events.map(e => ({ ...e, actorName: e.actorUserId ? nameById.get(e.actorUserId) ?? null : null }));
+  return { events: withActor, page, limit, total };
 }
