@@ -6,12 +6,22 @@ export type CategoryResult<T> = { ok: true; value: T } | { ok: false; error: Men
 
 export interface ListCategoriesParams {
   isActive?: boolean;
+  page?: number;
+  perPage?: number;
 }
 
-export async function listCategories(venueId: string, params: ListCategoriesParams): Promise<MenuCategory[]> {
+export async function listCategories(venueId: string, params: ListCategoriesParams) {
   const where: Prisma.MenuCategoryWhereInput = { venueId, deletedAt: null };
   if (params.isActive !== undefined) where.isActive = params.isActive;
-  return scopedPrisma.menuCategory.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] });
+
+  const page = Math.max(1, params.page ?? 1);
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
+
+  const [categories, total] = await Promise.all([
+    scopedPrisma.menuCategory.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], skip: (page - 1) * perPage, take: perPage }),
+    scopedPrisma.menuCategory.count({ where }),
+  ]);
+  return { categories, page, perPage, total };
 }
 
 export interface CategoryInput {

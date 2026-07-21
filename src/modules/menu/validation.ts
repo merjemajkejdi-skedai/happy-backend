@@ -1,15 +1,9 @@
 import { prisma } from '../../db/prisma';
 import type { VenueType, Destination } from '../../generated/prisma/client';
+import { err, type DomainError } from '../../lib/domainError';
 
-export interface MenuDomainError {
-  status: number;
-  code: string;
-  message: string;
-}
-
-export function err(status: number, code: string, message: string): MenuDomainError {
-  return { status, code, message };
-}
+export { err };
+export type MenuDomainError = DomainError;
 
 export interface VenueMenuContext {
   venueType: VenueType;

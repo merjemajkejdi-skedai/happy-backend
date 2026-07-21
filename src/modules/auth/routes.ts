@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { sendData, sendError } from '../../lib/response';
 import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
+import { loginRateLimiter } from '../../middleware/rateLimiter';
 import * as authService from './service';
 
 export const authRouter = Router();
@@ -11,7 +12,7 @@ function userView(user: { id: string; fullName: string; email: string | null; ro
 }
 
 // POST /login/pin — { venue_slug, pin }
-authRouter.post('/login/pin', async (req: Request, res: Response) => {
+authRouter.post('/login/pin', loginRateLimiter, async (req: Request, res: Response) => {
   const { venue_slug, pin } = req.body ?? {};
   if (!venue_slug?.trim() || !pin?.trim()) return sendError(res, 'VALIDATION_ERROR', 'venue_slug and pin are required');
 
@@ -28,7 +29,7 @@ authRouter.post('/login/pin', async (req: Request, res: Response) => {
 });
 
 // POST /login/email — { venue_slug, email, password }
-authRouter.post('/login/email', async (req: Request, res: Response) => {
+authRouter.post('/login/email', loginRateLimiter, async (req: Request, res: Response) => {
   const { venue_slug, email, password } = req.body ?? {};
   if (!venue_slug?.trim() || !email?.trim() || !password) {
     return sendError(res, 'VALIDATION_ERROR', 'venue_slug, email and password are required');
@@ -76,8 +77,11 @@ authRouter.post('/refresh', async (req: Request, res: Response) => {
   });
 });
 
-// POST /logout — { refresh_token }
-authRouter.post('/logout', async (req: Request, res: Response) => {
+// POST /logout — { refresh_token }. Requires a valid access token (not just
+// the refresh token) — deliberate: /auth/refresh is public because refresh
+// itself proves possession of a valid credential, but logout is a mutating
+// action on an authenticated session, not just a credential-based lookup.
+authRouter.post('/logout', authenticate, venueScope, async (req: Request, res: Response) => {
   const { refresh_token } = req.body ?? {};
   if (!refresh_token?.trim()) return sendError(res, 'VALIDATION_ERROR', 'refresh_token is required');
   await authService.logout(String(refresh_token));

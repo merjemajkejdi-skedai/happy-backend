@@ -3,18 +3,26 @@ import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendError } from '../../lib/response';
+import { getSettingsRow } from '../settings/service';
 import * as venueService from './service';
+import { serializeVenue } from './serializers';
 
 export const venueRouter = Router();
 venueRouter.use(authenticate, venueScope);
 
 venueRouter.get('/', async (req: Request, res: Response) => {
-  const venue = await venueService.getVenue(req.auth!.venueId);
+  const [venue, settings] = await Promise.all([
+    venueService.getVenue(req.auth!.venueId),
+    getSettingsRow(req.auth!.venueId),
+  ]);
   if (!venue) return sendError(res, 'NOT_FOUND', 'Venue not found');
-  sendData(res, venue);
+  sendData(res, serializeVenue(venue, settings?.pmsEnabled));
 });
 
 venueRouter.patch('/', requirePermission('venue.write'), async (req: Request, res: Response) => {
-  const venue = await venueService.updateVenue(req.auth!.venueId, req.body ?? {});
-  sendData(res, venue);
+  const [venue, settings] = await Promise.all([
+    venueService.updateVenue(req.auth!.venueId, req.body ?? {}),
+    getSettingsRow(req.auth!.venueId),
+  ]);
+  sendData(res, serializeVenue(venue, settings?.pmsEnabled));
 });

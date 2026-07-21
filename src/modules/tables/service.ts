@@ -1,6 +1,7 @@
 import { scopedPrisma } from '../../middleware/venueScope';
 import { prisma } from '../../db/prisma';
 import { Prisma, type RestaurantTable, type TableStatus, type TableNaming, type OrderStatus } from '../../generated/prisma/client';
+import { err, type DomainError } from '../../lib/domainError';
 
 // Matches the partial unique index on orders(table_id) — see docs/SCHEMA.md.
 // Exported for reuse by the orders module (same statuses guard table
@@ -8,15 +9,7 @@ import { Prisma, type RestaurantTable, type TableStatus, type TableNaming, type 
 export const ACTIVE_ORDER_STATUSES: OrderStatus[] = ['draft', 'open', 'sent', 'partially_served', 'served'];
 const MAX_BULK_RANGE = 500; // defensive cap — not spec'd, just guards against an absurd request
 
-export interface TableDomainError {
-  status: number;
-  code: string;
-  message: string;
-}
-
-function err(status: number, code: string, message: string): TableDomainError {
-  return { status, code, message };
-}
+export type TableDomainError = DomainError;
 
 export type TableResult<T> = { ok: true; value: T } | { ok: false; error: TableDomainError };
 
@@ -72,6 +65,8 @@ export interface TableWithSummary extends RestaurantTable {
 export interface ListTablesParams {
   areaId?: string;
   status?: TableStatus;
+  page?: number;
+  perPage?: number;
 }
 
 // Two flat queries + an in-memory join, rather than a nested `include` —
@@ -107,24 +102,29 @@ async function getActiveOrderSummaries(venueId: string, tableIds: string[]): Pro
   return map;
 }
 
-export async function listTables(venueId: string, params: ListTablesParams): Promise<TableWithSummary[]> {
+export async function listTables(venueId: string, params: ListTablesParams) {
   const where: Prisma.RestaurantTableWhereInput = { venueId, deletedAt: null };
   if (params.areaId) where.areaId = params.areaId;
   if (params.status) where.status = params.status;
 
-  const [tables, namingMode] = await Promise.all([
-    scopedPrisma.restaurantTable.findMany({ where, orderBy: { sortOrder: 'asc' } }),
+  const page = Math.max(1, params.page ?? 1);
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
+
+  const [tables, total, namingMode] = await Promise.all([
+    scopedPrisma.restaurantTable.findMany({ where, orderBy: { sortOrder: 'asc' }, skip: (page - 1) * perPage, take: perPage }),
+    scopedPrisma.restaurantTable.count({ where }),
     getNamingMode(venueId),
   ]);
-  if (tables.length === 0) return [];
+  if (tables.length === 0) return { tables: [] as TableWithSummary[], page, perPage, total };
 
   const summaries = await getActiveOrderSummaries(venueId, tables.map(t => t.id));
 
-  return tables.map(t => ({
+  const withSummary = tables.map(t => ({
     ...t,
     displayLabel: computeDisplayLabel(namingMode, t.tableNumber, t.tableName),
     activeOrder: summaries.get(t.id) ?? null,
   }));
+  return { tables: withSummary, page, perPage, total };
 }
 
 export async function getTable(venueId: string, tableId: string): Promise<TableWithSummary | null> {

@@ -3,6 +3,7 @@ import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import { serializeUser } from '../../shared/userSerializer';
 import * as usersService from './service';
 import type { UserResult, UserDomainError } from './service';
@@ -20,14 +21,15 @@ function respond<T>(res: Response, result: UserResult<T>, map: (value: T) => unk
 }
 
 usersRouter.get('/', async (req: Request, res: Response) => {
-  const { role, is_active, page, limit } = req.query as Record<string, string>;
+  const { role, is_active } = req.query as Record<string, string>;
+  const { page, perPage } = parsePagination(req.query);
   const result = await usersService.listUsers(req.auth!.venueId, {
     role,
     isActive: is_active === undefined ? undefined : is_active === 'true',
-    page: page ? Number(page) : undefined,
-    limit: limit ? Number(limit) : undefined,
+    page,
+    perPage,
   });
-  sendData(res, result.users.map(serializeUser), { page: result.page, limit: result.limit, total: result.total });
+  sendData(res, result.users.map(serializeUser), buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
 usersRouter.post('/', async (req: Request, res: Response) => {

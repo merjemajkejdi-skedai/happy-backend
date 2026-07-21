@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { runIdempotent } from '../../lib/idempotency';
 import * as orderItemsService from './orderItemsService';
 import * as lifecycleService from './lifecycleService';
 import { serializeOrderItem } from './serializers';
@@ -13,22 +14,17 @@ orderItemsRouter.post('/', requirePermission('order.create'), async (req: Reques
   const { menu_item_id, quantity, modifier_option_ids, notes, course_number } = req.body ?? {};
   if (!menu_item_id) return sendError(res, 'VALIDATION_ERROR', 'menu_item_id is required');
 
-  const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-  const result = await orderItemsService.addItem(
-    req.auth!.venueId,
-    req.auth!.userId,
-    req.params.id,
-    {
+  await runIdempotent(req, res, 'POST /orders/:id/items', async () => {
+    const result = await orderItemsService.addItem(req.auth!.venueId, req.auth!.userId, req.params.id, {
       menuItemId: menu_item_id,
       quantity,
       modifierOptionIds: modifier_option_ids,
       notes: notes ?? null,
       courseNumber: course_number,
-    },
-    idempotencyKey,
-  );
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, serializeOrderItem(result.value));
+    });
+    if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+    return { status: 200, body: { data: serializeOrderItem(result.value), meta: {} } };
+  });
 });
 
 orderItemsRouter.patch('/:itemId', requirePermission('order.create'), async (req: Request, res: Response) => {

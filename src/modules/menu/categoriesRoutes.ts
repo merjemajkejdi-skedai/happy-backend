@@ -1,16 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as categoriesService from './categoriesService';
 
 export const categoriesRouter = Router();
 
 categoriesRouter.get('/', async (req: Request, res: Response) => {
   const { is_active } = req.query as Record<string, string>;
-  const categories = await categoriesService.listCategories(req.auth!.venueId, {
+  const { page, perPage } = parsePagination(req.query);
+  const result = await categoriesService.listCategories(req.auth!.venueId, {
     isActive: is_active === undefined ? undefined : is_active === 'true',
+    page,
+    perPage,
   });
-  sendData(res, categories, { count: categories.length });
+  sendData(res, result.categories, buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
 categoriesRouter.post('/', requirePermission('menu.write'), async (req: Request, res: Response) => {

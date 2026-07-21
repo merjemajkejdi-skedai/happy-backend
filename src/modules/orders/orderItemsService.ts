@@ -17,10 +17,6 @@ import { roleHasPermission } from '../../shared/permissions';
 
 export type OrderItemResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
 
-function isConflict(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
-}
-
 // An item can only be added/edited while its order is still being built up
 // or actively being served — not once it's fully served, closed, or cancelled.
 const ITEM_MUTABLE_ORDER_STATUSES: OrderStatus[] = ['draft', 'open', 'sent', 'partially_served'];
@@ -100,16 +96,7 @@ export async function addItem(
   actorUserId: string,
   orderId: string,
   input: AddItemInput,
-  idempotencyKey?: string,
 ): Promise<OrderItemResult<OrderItemWithModifiers>> {
-  if (idempotencyKey) {
-    const existing = await scopedPrisma.orderItem.findFirst({ where: { orderId, venueId, idempotencyKey } });
-    if (existing) {
-      const modifiers = await prisma.orderItemModifier.findMany({ where: { orderItemId: existing.id } });
-      return { ok: true, value: { ...existing, modifiers } };
-    }
-  }
-
   const order = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
   if (!order) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
   if (!ITEM_MUTABLE_ORDER_STATUSES.includes(order.status)) {
@@ -147,73 +134,61 @@ export async function addItem(
   const modifiersTotal = selectedOptions.reduce((sum, o) => sum.plus(o.priceDelta), new Prisma.Decimal(0));
   const lineTotal = unitPriceSnapshot.plus(modifiersTotal).times(quantity);
 
-  try {
-    const result = await scopedPrisma.$transaction(async tx => {
-      const created = await tx.orderItem.create({
-        data: {
-          orderId,
-          venueId,
-          menuItemId: menuItem.id,
-          itemNameSnapshot: menuItem.name,
-          categoryNameSnapshot: category.name,
-          unitPriceSnapshot,
-          destinationSnapshot: menuItem.destination,
-          courseNumberSnapshot,
-          taxRateSnapshot,
-          quantity,
-          modifiersTotal,
-          lineTotal,
-          status: 'pending',
-          notes: input.notes ?? null,
-          addedByUserId: actorUserId,
-          idempotencyKey: idempotencyKey ?? null,
-        },
-      });
-
-      if (selectedOptions.length > 0) {
-        await tx.orderItemModifier.createMany({
-          data: selectedOptions.map(o => ({
-            orderItemId: created.id,
-            modifierOptionId: o.id,
-            groupNameSnapshot: groupsById.get(o.groupId)!.name,
-            optionNameSnapshot: o.name,
-            priceDeltaSnapshot: o.priceDelta,
-          })),
-        });
-      }
-
-      await tx.orderEvent.create({
-        data: {
-          venueId,
-          orderId,
-          orderItemId: created.id,
-          eventType: 'item.added',
-          actorUserId,
-          payload: { menuItemId: menuItem.id, name: created.itemNameSnapshot, quantity },
-        },
-      });
-
-      if (settings.autoSendOnAdd) {
-        await sendItemsCore(tx, venueId, orderId, actorUserId, [created.id]);
-      } else {
-        await recomputeOrder(tx, venueId, orderId);
-      }
-
-      const finalItem = await tx.orderItem.findUniqueOrThrow({ where: { id: created.id } });
-      const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: created.id } });
-      return { ...finalItem, modifiers };
+  const result = await scopedPrisma.$transaction(async tx => {
+    const created = await tx.orderItem.create({
+      data: {
+        orderId,
+        venueId,
+        menuItemId: menuItem.id,
+        itemNameSnapshot: menuItem.name,
+        categoryNameSnapshot: category.name,
+        unitPriceSnapshot,
+        destinationSnapshot: menuItem.destination,
+        courseNumberSnapshot,
+        taxRateSnapshot,
+        quantity,
+        modifiersTotal,
+        lineTotal,
+        status: 'pending',
+        notes: input.notes ?? null,
+        addedByUserId: actorUserId,
+      },
     });
-    return { ok: true, value: result };
-  } catch (e) {
-    if (isConflict(e) && idempotencyKey) {
-      const existing = await scopedPrisma.orderItem.findFirst({ where: { orderId, venueId, idempotencyKey } });
-      if (existing) {
-        const modifiers = await prisma.orderItemModifier.findMany({ where: { orderItemId: existing.id } });
-        return { ok: true, value: { ...existing, modifiers } };
-      }
+
+    if (selectedOptions.length > 0) {
+      await tx.orderItemModifier.createMany({
+        data: selectedOptions.map(o => ({
+          orderItemId: created.id,
+          modifierOptionId: o.id,
+          groupNameSnapshot: groupsById.get(o.groupId)!.name,
+          optionNameSnapshot: o.name,
+          priceDeltaSnapshot: o.priceDelta,
+        })),
+      });
     }
-    throw e;
-  }
+
+    await tx.orderEvent.create({
+      data: {
+        venueId,
+        orderId,
+        orderItemId: created.id,
+        eventType: 'item.added',
+        actorUserId,
+        payload: { menuItemId: menuItem.id, name: created.itemNameSnapshot, quantity },
+      },
+    });
+
+    if (settings.autoSendOnAdd) {
+      await sendItemsCore(tx, venueId, orderId, actorUserId, [created.id]);
+    } else {
+      await recomputeOrder(tx, venueId, orderId);
+    }
+
+    const finalItem = await tx.orderItem.findUniqueOrThrow({ where: { id: created.id } });
+    const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: created.id } });
+    return { ...finalItem, modifiers };
+  });
+  return { ok: true, value: result };
 }
 
 // ── Update (pending only) ────────────────────────────────────────────────────

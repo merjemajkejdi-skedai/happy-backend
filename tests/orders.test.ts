@@ -382,34 +382,5 @@ describe('Totals math with modifiers and mixed tax rates', () => {
   });
 });
 
-describe('Idempotency replay', () => {
-  it('POST /orders: the same key returns the original order instead of creating a duplicate', async () => {
-    const key = `order-key-${Date.now()}`;
-    const first = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' }, key);
-    const second = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' }, key);
-    expect(first.ok && second.ok).toBe(true);
-    if (first.ok && second.ok) expect(first.value.id).toBe(second.value.id);
-
-    const count = await prisma.order.count({ where: { venueId: fx.venueId, idempotencyKey: key } });
-    expect(count).toBe(1);
-  });
-
-  it('POST /orders/:id/items: the same key returns the original item instead of creating a duplicate', async () => {
-    const orderResult = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' });
-    if (!orderResult.ok) throw new Error('setup failed');
-    const orderId = orderResult.value.id;
-
-    const key = `item-key-${Date.now()}`;
-    const first = await orderItemsService.addItem(
-      fx.venueId, fx.adminUserId, orderId, { menuItemId: fx.itemId, modifierOptionIds: [fx.cheeseOptionId] }, key,
-    );
-    const second = await orderItemsService.addItem(
-      fx.venueId, fx.adminUserId, orderId, { menuItemId: fx.itemId, modifierOptionIds: [fx.cheeseOptionId] }, key,
-    );
-    expect(first.ok && second.ok).toBe(true);
-    if (first.ok && second.ok) expect(first.value.id).toBe(second.value.id);
-
-    const count = await prisma.orderItem.count({ where: { orderId, idempotencyKey: key } });
-    expect(count).toBe(1);
-  });
-});
+// Idempotency-Key handling itself moved to a generic lib/idempotency.ts store
+// in Prompt 10 — see tests/idempotency.test.ts.

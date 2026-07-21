@@ -352,22 +352,5 @@ describe('Waiter cancel allowed before send and denied after', () => {
   });
 });
 
-describe('Send idempotency', () => {
-  it('the same key returns the original summary instead of re-sending', async () => {
-    const orderResult = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' });
-    if (!orderResult.ok) throw new Error('setup failed');
-    const orderId = orderResult.value.id;
-    await orderItemsService.addItem(fx.venueId, fx.adminUserId, orderId, { menuItemId: fx.burgerId, quantity: 1 });
-
-    const key = `send-key-${Date.now()}`;
-    const first = await lifecycleService.sendItems(fx.venueId, fx.adminUserId, orderId, {}, key);
-    const second = await lifecycleService.sendItems(fx.venueId, fx.adminUserId, orderId, {}, key);
-    expect(first.ok && second.ok).toBe(true);
-    if (first.ok && second.ok) expect(first.value).toEqual(second.value);
-
-    const eventCount = await prisma.orderEvent.count({ where: { orderId, eventType: 'order.sent' } });
-    expect(eventCount).toBe(1);
-
-    await lifecycleService.cancelOrder(fx.venueId, fx.adminUserId, 'admin', orderId, 'cleanup');
-  });
-});
+// Idempotency-Key handling itself moved to a generic lib/idempotency.ts store
+// in Prompt 10 — see tests/idempotency.test.ts.

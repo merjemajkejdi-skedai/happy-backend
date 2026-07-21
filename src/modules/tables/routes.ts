@@ -3,6 +3,7 @@ import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as tablesService from './service';
 import type { TableResult, TableDomainError } from './service';
 import type { TableStatus } from '../../generated/prisma/client';
@@ -26,8 +27,9 @@ tablesRouter.get('/', async (req: Request, res: Response) => {
   if (status && !TABLE_STATUSES.includes(status as TableStatus)) {
     return sendError(res, 'VALIDATION_ERROR', `status must be one of: ${TABLE_STATUSES.join(', ')}`);
   }
-  const tables = await tablesService.listTables(req.auth!.venueId, { areaId: area_id, status: status as TableStatus | undefined });
-  sendData(res, tables, { count: tables.length });
+  const { page, perPage } = parsePagination(req.query);
+  const result = await tablesService.listTables(req.auth!.venueId, { areaId: area_id, status: status as TableStatus | undefined, page, perPage });
+  sendData(res, result.tables, buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
 tablesRouter.post('/', requirePermission('table.write'), async (req: Request, res: Response) => {

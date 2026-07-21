@@ -3,14 +3,16 @@ import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as areasService from './service';
 
 export const areasRouter = Router();
 areasRouter.use(authenticate, venueScope);
 
 areasRouter.get('/', async (req: Request, res: Response) => {
-  const areas = await areasService.listAreas(req.auth!.venueId);
-  sendData(res, areas, { count: areas.length });
+  const { page, perPage } = parsePagination(req.query);
+  const result = await areasService.listAreas(req.auth!.venueId, { page, perPage });
+  sendData(res, result.areas, buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
 areasRouter.post('/', requirePermission('table.write'), async (req: Request, res: Response) => {

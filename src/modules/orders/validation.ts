@@ -1,6 +1,10 @@
 import { prisma } from '../../db/prisma';
 import { scopedPrisma } from '../../middleware/venueScope';
 import type { RestaurantSettings, Venue } from '../../generated/prisma/client';
+import { err, type DomainError } from '../../lib/domainError';
+
+export { err };
+export type OrderDomainError = DomainError;
 
 // The interactive-transaction callback parameter type for the venueScope
 // *extended* client doesn't structurally match Prisma's own (base, non-
@@ -9,16 +13,6 @@ import type { RestaurantSettings, Venue } from '../../generated/prisma/client';
 // scopedPrisma.$transaction's own callback signature sidesteps that fight
 // entirely and stays exact if the extension ever changes.
 export type Tx = Parameters<Parameters<typeof scopedPrisma.$transaction>[0]>[0];
-
-export interface OrderDomainError {
-  status: number;
-  code: string;
-  message: string;
-}
-
-export function err(status: number, code: string, message: string): OrderDomainError {
-  return { status, code, message };
-}
 
 // Ticket/order numbering resets daily (business_date = the venue's local
 // "today") unless ticket_number_reset is 'never', in which case a single

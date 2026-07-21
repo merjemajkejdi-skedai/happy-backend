@@ -29,12 +29,21 @@ export interface ModifierGroupWithOptions extends ModifierGroup {
   options: ModifierOption[];
 }
 
-export async function listModifierGroups(venueId: string): Promise<ModifierGroupWithOptions[]> {
-  const groups = await scopedPrisma.modifierGroup.findMany({
-    where: { venueId, deletedAt: null },
-    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-  });
-  if (groups.length === 0) return [];
+export interface ListModifierGroupsParams {
+  page?: number;
+  perPage?: number;
+}
+
+export async function listModifierGroups(venueId: string, params: ListModifierGroupsParams = {}) {
+  const where = { venueId, deletedAt: null };
+  const page = Math.max(1, params.page ?? 1);
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
+
+  const [groups, total] = await Promise.all([
+    scopedPrisma.modifierGroup.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], skip: (page - 1) * perPage, take: perPage }),
+    scopedPrisma.modifierGroup.count({ where }),
+  ]);
+  if (groups.length === 0) return { groups: [] as ModifierGroupWithOptions[], page, perPage, total };
 
   const options = await scopedPrisma.modifierOption.findMany({
     where: { groupId: { in: groups.map(g => g.id) }, deletedAt: null },
@@ -47,7 +56,8 @@ export async function listModifierGroups(venueId: string): Promise<ModifierGroup
     optionsByGroup.set(o.groupId, list);
   }
 
-  return groups.map(g => ({ ...g, options: optionsByGroup.get(g.id) ?? [] }));
+  const withOptions = groups.map(g => ({ ...g, options: optionsByGroup.get(g.id) ?? [] }));
+  return { groups: withOptions, page, perPage, total };
 }
 
 export interface ModifierGroupInput {

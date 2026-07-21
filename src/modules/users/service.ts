@@ -2,19 +2,12 @@ import bcrypt from 'bcrypt';
 import { scopedPrisma } from '../../middleware/venueScope';
 import { pinLookup } from '../../shared/pin';
 import { Prisma, type User, type UserRole } from '../../generated/prisma/client';
+import { err, type DomainError } from '../../lib/domainError';
 
 const ALLOWED_ROLES: UserRole[] = ['waiter', 'kitchen', 'admin'];
 const BCRYPT_COST = 10;
 
-export interface UserDomainError {
-  status: number;
-  code: string;
-  message: string;
-}
-
-function err(status: number, code: string, message: string): UserDomainError {
-  return { status, code, message };
-}
+export type UserDomainError = DomainError;
 
 export type UserResult<T> = { ok: true; value: T } | { ok: false; error: UserDomainError };
 
@@ -40,22 +33,22 @@ export interface ListUsersParams {
   role?: string;
   isActive?: boolean;
   page?: number;
-  limit?: number;
+  perPage?: number;
 }
 
 export async function listUsers(venueId: string, params: ListUsersParams) {
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
   const where: Prisma.UserWhereInput = { venueId, deletedAt: null };
   if (params.role) where.role = params.role as UserRole;
   if (params.isActive !== undefined) where.isActive = params.isActive;
 
   const [users, total] = await Promise.all([
-    scopedPrisma.user.findMany({ where, orderBy: { createdAt: 'asc' }, skip: (page - 1) * limit, take: limit }),
+    scopedPrisma.user.findMany({ where, orderBy: { createdAt: 'asc' }, skip: (page - 1) * perPage, take: perPage }),
     scopedPrisma.user.count({ where }),
   ]);
 
-  return { users, page, limit, total };
+  return { users, page, perPage, total };
 }
 
 export async function getUser(venueId: string, userId: string): Promise<User | null> {

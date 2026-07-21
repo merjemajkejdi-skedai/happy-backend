@@ -66,9 +66,15 @@ No routes or business logic exist yet. This is schema only.
 | `order_events` | **Append-only audit log.** One row per order state change; no `updated_at`, and application code must never `UPDATE`/`DELETE` a row here. `venue_id` is intentionally a plain column with no foreign key (unlike every other `venue_id` in this schema, which is a real FK) — it's denormalized purely for query convenience on an audit table that's expected to outlive some of its relations. |
 | `ticket_counters` | Composite PK `(venue_id, business_date)`. Tracks the last-issued order number and counter-service ticket number per venue per day, so numbering can reset daily without a race-prone `MAX()` query. |
 
+### Hardening
+
+| Table | Purpose |
+|---|---|
+| `idempotency_requests` | Generic `Idempotency-Key` store, scoped `(venue_id, user_id, route, idempotency_key)`, used by `POST /orders`, `POST /orders/:id/items`, and `POST /orders/:id/send`. Records `status` (`in_progress`/`completed`) plus the stored `response_status`/`response_body` so a replay within 24h returns the exact original response — see `src/lib/idempotency.ts`. Not soft-deletable; stale rows are inert once their key falls outside the replay window, not garbage-collected in Phase 1. |
+
 ## Enums
 
-`venue_type`, `user_role` (`manager`/`bar` defined but unused by any route in Phase 1), `login_method`, `table_naming`, `service_mode`, `destination`, `table_status`, `order_status`, `order_item_status`, `modifier_type` — see `prisma/schema.prisma` for the exact value lists. All are native Postgres enum types (not `text` + `CHECK`).
+`venue_type`, `user_role` (`manager`/`bar` defined but unused by any route in Phase 1), `login_method`, `table_naming`, `service_mode`, `destination`, `table_status`, `order_status`, `order_item_status`, `modifier_type`, `idempotency_status` — see `prisma/schema.prisma` for the exact value lists. All are native Postgres enum types (not `text` + `CHECK`).
 
 ## Extensions
 
@@ -93,8 +99,7 @@ schema-drift resolution.
 - **`order_items_quantity_check`** — `quantity > 0`.
 - **`orders_service_mode_check`** — `(service_mode = 'table' AND table_id IS NOT NULL) OR (service_mode = 'counter' AND ticket_number IS NOT NULL)`. A table-service order must reference a table; a counter-service order must have a ticket number. One or the other, never neither, never a mismatch.
 - **`orders_active_table_key`** — partial unique index on `orders(table_id)`, `WHERE table_id IS NOT NULL AND status IN ('draft', 'open', 'sent', 'partially_served', 'served')`. This is the DB-level guarantee that a table can have at most one *active* order at a time — once an order reaches `closed` or `cancelled`, the table frees up and a new order can be opened against it. Without the `status IN (...)` filter this would incorrectly block re-opening a table after a previous order closed.
-- **`orders_venue_id_idempotency_key_key`**, **`order_items_order_id_idempotency_key_key`** — partial unique indexes, `WHERE idempotency_key IS NOT NULL`, added in the orders-core migration. Back the `Idempotency-Key` header on `POST /orders` (scoped per venue) and `POST /orders/:id/items` (scoped per order): a retried request with the same key hits this constraint, which the route layer catches and turns into "return the original resource" instead of a duplicate.
-- **`order_events_order_id_idempotency_key_key`** — same pattern, `WHERE idempotency_key IS NOT NULL`, added in the order-lifecycle migration. Backs the `Idempotency-Key` header on `POST /orders/:id/send`: the key is stored on that call's `order.sent` summary event only (not on the per-item `item.status_changed` events it also writes), so a replay looks up that one row and returns its stored payload verbatim instead of re-sending already-sent items.
+- The per-column `idempotency_key` fields added to `orders`, `order_items`, and `order_events` in earlier migrations (Prompts 7-8) were removed in the hardening migration (Prompt 10) and replaced by the generic `idempotency_requests` table below — see `docs/API.md` / `src/lib/idempotency.ts` for how it's used.
 
 ## What's deliberately not enforced yet
 

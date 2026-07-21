@@ -10,6 +10,7 @@ import { sendError } from '../lib/response';
 const VENUE_SCOPED_MODELS = new Set([
   'RestaurantSettings', 'User', 'Area', 'RestaurantTable', 'MenuCategory',
   'MenuItem', 'ModifierGroup', 'Order', 'OrderItem', 'OrderEvent', 'TicketCounter',
+  'IdempotencyRequest',
 ]);
 
 // Operations that scan or bulk-touch rows — this is where "forgot to filter

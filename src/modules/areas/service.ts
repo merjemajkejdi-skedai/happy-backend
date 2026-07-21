@@ -1,20 +1,26 @@
 import { scopedPrisma } from '../../middleware/venueScope';
 import type { Area, Destination, Prisma } from '../../generated/prisma/client';
+import { err, type DomainError } from '../../lib/domainError';
 
-export interface AreaDomainError {
-  status: number;
-  code: string;
-  message: string;
-}
-
-function err(status: number, code: string, message: string): AreaDomainError {
-  return { status, code, message };
-}
+export type AreaDomainError = DomainError;
 
 export type AreaResult<T> = { ok: true; value: T } | { ok: false; error: AreaDomainError };
 
-export async function listAreas(venueId: string): Promise<Area[]> {
-  return scopedPrisma.area.findMany({ where: { venueId, deletedAt: null }, orderBy: { sortOrder: 'asc' } });
+export interface ListAreasParams {
+  page?: number;
+  perPage?: number;
+}
+
+export async function listAreas(venueId: string, params: ListAreasParams = {}) {
+  const page = Math.max(1, params.page ?? 1);
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
+  const where = { venueId, deletedAt: null };
+
+  const [areas, total] = await Promise.all([
+    scopedPrisma.area.findMany({ where, orderBy: { sortOrder: 'asc' }, skip: (page - 1) * perPage, take: perPage }),
+    scopedPrisma.area.count({ where }),
+  ]);
+  return { areas, page, perPage, total };
 }
 
 export interface AreaInput {

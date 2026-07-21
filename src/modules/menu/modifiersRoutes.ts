@@ -1,14 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as modifiersService from './modifiersService';
 import { serializeModifierOption } from './serializers';
 
 export const modifiersRouter = Router();
 
 modifiersRouter.get('/modifier-groups', async (req: Request, res: Response) => {
-  const groups = await modifiersService.listModifierGroups(req.auth!.venueId);
-  sendData(res, groups.map(g => ({ ...g, options: g.options.map(serializeModifierOption) })), { count: groups.length });
+  const { page, perPage } = parsePagination(req.query);
+  const result = await modifiersService.listModifierGroups(req.auth!.venueId, { page, perPage });
+  sendData(
+    res,
+    result.groups.map(g => ({ ...g, options: g.options.map(serializeModifierOption) })),
+    buildPaginationMeta(result.page, result.perPage, result.total),
+  );
 });
 
 modifiersRouter.post('/modifier-groups', requirePermission('menu.write'), async (req: Request, res: Response) => {

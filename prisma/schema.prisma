@@ -137,6 +137,7 @@ model Venue {
   orders         Order[]
   orderItems     OrderItem[]
   ticketCounters TicketCounter[]
+  idempotencyRequests IdempotencyRequest[]
 
   @@map("venues")
 }
@@ -227,6 +228,7 @@ model User {
   orderItemsAdded  OrderItem[]    @relation("OrderItemsAddedBy")
   orderItemsVoided OrderItem[]    @relation("OrderItemsVoidedBy")
   orderEvents      OrderEvent[]
+  idempotencyRequests IdempotencyRequest[]
 
   // Partial uniques (email/pin_lookup NULL-safe) + the password/pin CHECK are
   // hand-added to the generated migration SQL — Prisma has no declarative
@@ -430,17 +432,15 @@ model Order {
   pmsFolioId         String?          @map("pms_folio_id") // schema only
   pmsRoomNumber      String?          @map("pms_room_number") // schema only
   pmsPostedAt        DateTime?        @map("pms_posted_at") @db.Timestamptz // schema only
-  idempotencyKey     String?          @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per venue
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   items  OrderItem[]
   events OrderEvent[]
 
-  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, a
-  // partial unique index on table_id (one active order per table), and a
-  // partial unique index on (venue_id, idempotency_key) are hand-added — see
-  // docs/SCHEMA.md.
+  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, and a
+  // partial unique index on table_id (one active order per table), are
+  // hand-added — see docs/SCHEMA.md.
   @@unique([venueId, orderNumber])
   @@map("orders")
 }
@@ -476,15 +476,13 @@ model OrderItem {
   cancelReason         String?         @map("cancel_reason")
   voidByUserId         String?         @map("void_by_user_id") @db.Uuid
   voidByUser           User?           @relation("OrderItemsVoidedBy", fields: [voidByUserId], references: [id])
-  idempotencyKey       String?         @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per order
   createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   modifiers OrderItemModifier[]
   events    OrderEvent[]
 
-  // quantity > 0 CHECK, and a partial unique index on (order_id,
-  // idempotency_key), are hand-added.
+  // quantity > 0 CHECK is hand-added.
   @@index([venueId, destinationSnapshot, status])
   @@index([orderId])
   @@index([sentAt])
@@ -520,7 +518,6 @@ model OrderEvent {
   actorUserId String?    @map("actor_user_id") @db.Uuid
   actorUser   User?      @relation(fields: [actorUserId], references: [id])
   payload     Json       @default("{}")
-  idempotencyKey String? @map("idempotency_key") // client-supplied Idempotency-Key header, scoped per order — only POST /orders/:id/send uses this so far
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("order_events")
@@ -536,4 +533,35 @@ model TicketCounter {
 
   @@id([venueId, businessDate])
   @@map("ticket_counters")
+}
+
+// ── Hardening (Prompt 10) ────────────────────────────────────────────────────
+
+enum IdempotencyStatus {
+  in_progress
+  completed
+
+  @@map("idempotency_status")
+}
+
+// Generic Idempotency-Key store — supersedes the per-column approach
+// (orders/order_items/order_events.idempotency_key) from Prompts 7-8, which
+// this migration removes. Scoped per (venue, user, route, key) rather than
+// per-resource so one mechanism covers every idempotent POST route.
+model IdempotencyRequest {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId        String            @map("venue_id") @db.Uuid
+  venue          Venue             @relation(fields: [venueId], references: [id])
+  userId         String            @map("user_id") @db.Uuid
+  user           User              @relation(fields: [userId], references: [id])
+  route          String // e.g. "POST /orders", "POST /orders/:id/items", "POST /orders/:id/send"
+  idempotencyKey String            @map("idempotency_key")
+  status         IdempotencyStatus @default(in_progress)
+  responseStatus Int?              @map("response_status")
+  responseBody   Json?             @map("response_body")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  completedAt    DateTime?         @map("completed_at") @db.Timestamptz
+
+  @@unique([venueId, userId, route, idempotencyKey])
+  @@map("idempotency_requests")
 }

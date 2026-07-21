@@ -1,5 +1,4 @@
 import { scopedPrisma } from '../../middleware/venueScope';
-import { prisma } from '../../db/prisma';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { recomputeOrder } from './ordersService';
 import { roleHasPermission } from '../../shared/permissions';
@@ -73,13 +72,7 @@ export async function sendItems(
   actorUserId: string,
   orderId: string,
   input: SendItemsInput,
-  idempotencyKey?: string,
 ): Promise<LifecycleResult<SendSummary>> {
-  if (idempotencyKey) {
-    const existing = await prisma.orderEvent.findFirst({ where: { orderId, venueId, idempotencyKey } });
-    if (existing) return { ok: true, value: existing.payload as unknown as SendSummary };
-  }
-
   const order = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
   if (!order) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
 
@@ -95,27 +88,15 @@ export async function sendItems(
   }
   if (eligible.length === 0) return { ok: false, error: err(422, 'NO_PENDING_ITEMS', 'There are no pending items to send') };
 
-  try {
-    const summary = await scopedPrisma.$transaction(async tx => {
-      const sentItems = await sendItemsCore(tx, venueId, orderId, actorUserId, eligible.map(i => i.id));
-      const result = buildSendSummary(sentItems);
-      await tx.orderEvent.create({
-        data: {
-          venueId, orderId, eventType: 'order.sent', actorUserId,
-          idempotencyKey: idempotencyKey ?? null,
-          payload: result as unknown as Prisma.InputJsonValue,
-        },
-      });
-      return result;
+  const summary = await scopedPrisma.$transaction(async tx => {
+    const sentItems = await sendItemsCore(tx, venueId, orderId, actorUserId, eligible.map(i => i.id));
+    const result = buildSendSummary(sentItems);
+    await tx.orderEvent.create({
+      data: { venueId, orderId, eventType: 'order.sent', actorUserId, payload: result as unknown as Prisma.InputJsonValue },
     });
-    return { ok: true, value: summary };
-  } catch (e) {
-    if (isConflict(e) && idempotencyKey) {
-      const existing = await prisma.orderEvent.findFirst({ where: { orderId, venueId, idempotencyKey } });
-      if (existing) return { ok: true, value: existing.payload as unknown as SendSummary };
-    }
-    throw e;
-  }
+    return result;
+  });
+  return { ok: true, value: summary };
 }
 
 // ── Transfer ─────────────────────────────────────────────────────────────────

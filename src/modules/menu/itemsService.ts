@@ -13,23 +13,23 @@ export interface ListItemsParams {
   isAvailable?: boolean;
   search?: string;
   page?: number;
-  limit?: number;
+  perPage?: number;
 }
 
 export async function listItems(venueId: string, params: ListItemsParams) {
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
   const where: Prisma.MenuItemWhereInput = { venueId, deletedAt: null };
   if (params.categoryId) where.categoryId = params.categoryId;
   if (params.isAvailable !== undefined) where.isAvailable = params.isAvailable;
   if (params.search) where.name = { contains: params.search, mode: 'insensitive' };
 
   const [items, total] = await Promise.all([
-    scopedPrisma.menuItem.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], skip: (page - 1) * limit, take: limit }),
+    scopedPrisma.menuItem.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], skip: (page - 1) * perPage, take: perPage }),
     scopedPrisma.menuItem.count({ where }),
   ]);
 
-  return { items, page, limit, total };
+  return { items, page, perPage, total };
 }
 
 export async function getItem(venueId: string, itemId: string): Promise<MenuItem | null> {

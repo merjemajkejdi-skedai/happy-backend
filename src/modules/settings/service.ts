@@ -1,6 +1,7 @@
 import { prisma } from '../../db/prisma';
 import { logger } from '../../shared/logger';
 import type { RestaurantSettings, Prisma } from '../../generated/prisma/client';
+import type { ErrorCode } from '../../shared/errorCodes';
 
 const EDITABLE_FIELDS = [
   'loginMethod', 'pinLength', 'sessionTimeoutMinutes', 'requirePinOnReopen',
@@ -17,7 +18,7 @@ const EDITABLE_FIELDS = [
 export type SettingsPatchInput = Partial<Record<(typeof EDITABLE_FIELDS)[number], unknown>>;
 
 export interface SettingsValidationError {
-  code: string;
+  code: ErrorCode;
   message: string;
 }
 

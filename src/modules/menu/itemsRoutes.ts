@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as itemsService from './itemsService';
 import * as modifiersService from './modifiersService';
 import { serializeMenuItem } from './serializers';
@@ -8,15 +9,16 @@ import { serializeMenuItem } from './serializers';
 export const itemsRouter = Router();
 
 itemsRouter.get('/', async (req: Request, res: Response) => {
-  const { category_id, is_available, search, page, limit } = req.query as Record<string, string>;
+  const { category_id, is_available, search } = req.query as Record<string, string>;
+  const { page, perPage } = parsePagination(req.query);
   const result = await itemsService.listItems(req.auth!.venueId, {
     categoryId: category_id,
     isAvailable: is_available === undefined ? undefined : is_available === 'true',
     search,
-    page: page ? Number(page) : undefined,
-    limit: limit ? Number(limit) : undefined,
+    page,
+    perPage,
   });
-  sendData(res, result.items.map(serializeMenuItem), { page: result.page, limit: result.limit, total: result.total });
+  sendData(res, result.items.map(serializeMenuItem), buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
 itemsRouter.post('/', requirePermission('menu.write'), async (req: Request, res: Response) => {

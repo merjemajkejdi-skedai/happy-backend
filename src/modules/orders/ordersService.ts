@@ -72,13 +72,7 @@ export async function createOrder(
   venueId: string,
   actorUserId: string,
   input: CreateOrderInput,
-  idempotencyKey?: string,
 ): Promise<OrderResult<Order>> {
-  if (idempotencyKey) {
-    const existing = await scopedPrisma.order.findFirst({ where: { venueId, idempotencyKey } });
-    if (existing) return { ok: true, value: existing };
-  }
-
   if (input.serviceMode !== 'table' && input.serviceMode !== 'counter') {
     return { ok: false, error: err(422, 'VALIDATION_ERROR', "service_mode must be 'table' or 'counter'") };
   }
@@ -125,7 +119,6 @@ export async function createOrder(
           notes: input.notes ?? null,
           status: 'draft',
           openedByUserId: actorUserId,
-          idempotencyKey: idempotencyKey ?? null,
         },
       });
 
@@ -148,15 +141,6 @@ export async function createOrder(
     return { ok: true, value: order };
   } catch (e) {
     if (isConflict(e)) {
-      // Two distinct unique constraints could have fired here: the
-      // idempotency-key replay race, or the one-active-order-per-table
-      // guarantee. Re-check the idempotency case first (a legitimate
-      // successful replay, not an error) before falling back to the table
-      // conflict this route explicitly promises to report.
-      if (idempotencyKey) {
-        const existing = await scopedPrisma.order.findFirst({ where: { venueId, idempotencyKey } });
-        if (existing) return { ok: true, value: existing };
-      }
       return { ok: false, error: err(409, 'TABLE_ALREADY_HAS_ACTIVE_ORDER', 'This table already has an active order') };
     }
     throw e;
@@ -172,12 +156,12 @@ export interface ListOrdersParams {
   mine?: boolean;
   date?: string; // YYYY-MM-DD
   page?: number;
-  limit?: number;
+  perPage?: number;
 }
 
 export async function listOrders(venueId: string, actorUserId: string, params: ListOrdersParams) {
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
   const where: Prisma.OrderWhereInput = { venueId };
   if (params.status) where.status = params.status;
   if (params.tableId) where.tableId = params.tableId;
@@ -190,11 +174,11 @@ export async function listOrders(venueId: string, actorUserId: string, params: L
   }
 
   const [orders, total] = await Promise.all([
-    scopedPrisma.order.findMany({ where, orderBy: { openedAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+    scopedPrisma.order.findMany({ where, orderBy: { openedAt: 'desc' }, skip: (page - 1) * perPage, take: perPage }),
     scopedPrisma.order.count({ where }),
   ]);
 
-  return { orders, page, limit, total };
+  return { orders, page, perPage, total };
 }
 
 export interface OrderWithDetails extends Order {
@@ -291,7 +275,7 @@ export interface OrderEventWithActor extends OrderEvent {
 
 export interface ListOrderEventsParams {
   page?: number;
-  limit?: number;
+  perPage?: number;
 }
 
 export async function listOrderEvents(venueId: string, orderId: string, params: ListOrderEventsParams) {
@@ -299,14 +283,14 @@ export async function listOrderEvents(venueId: string, orderId: string, params: 
   if (!order) return null;
 
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(100, Math.max(1, params.limit ?? 50));
+  const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
 
   const [events, total] = await Promise.all([
     prisma.orderEvent.findMany({
       where: { orderId, venueId },
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
+      skip: (page - 1) * perPage,
+      take: perPage,
     }),
     prisma.orderEvent.count({ where: { orderId, venueId } }),
   ]);
@@ -316,5 +300,5 @@ export async function listOrderEvents(venueId: string, orderId: string, params: 
   const nameById = new Map(actors.map(a => [a.id, a.fullName]));
 
   const withActor: OrderEventWithActor[] = events.map(e => ({ ...e, actorName: e.actorUserId ? nameById.get(e.actorUserId) ?? null : null }));
-  return { events: withActor, page, limit, total };
+  return { events: withActor, page, perPage, total };
 }
