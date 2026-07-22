@@ -1148,24 +1148,19 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "status",
+                    "ts"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "ts": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   }
                 }
@@ -1398,24 +1393,70 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
+                        "access_token": {
                           "type": "string"
                         },
-                        "details": {}
+                        "refresh_token": {
+                          "type": "string"
+                        },
+                        "refresh_expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "fullName": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "role": {
+                              "type": "string"
+                            },
+                            "venueId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          }
+                        },
+                        "venue": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "slug": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "venueType": {
+                              "type": "string"
+                            }
+                          }
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -1683,24 +1724,70 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
+                        "access_token": {
                           "type": "string"
                         },
-                        "details": {}
+                        "refresh_token": {
+                          "type": "string"
+                        },
+                        "refresh_expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "fullName": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "role": {
+                              "type": "string"
+                            },
+                            "venueId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          }
+                        },
+                        "venue": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "slug": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "venueType": {
+                              "type": "string"
+                            }
+                          }
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -1960,24 +2047,27 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
+                        "access_token": {
                           "type": "string"
                         },
-                        "details": {}
+                        "refresh_token": {
+                          "type": "string"
+                        },
+                        "refresh_expires_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -2210,24 +2300,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "loggedOut": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -2442,24 +2528,26 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
+                        "user": {
+                          "$ref": "#/components/schemas/User"
                         },
-                        "message": {
-                          "type": "string"
+                        "venue": {
+                          "$ref": "#/components/schemas/Venue"
                         },
-                        "details": {}
+                        "settings": {
+                          "$ref": "#/components/schemas/RestaurantSettings"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -2680,24 +2768,32 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
+                        "name": {
                           "type": "string"
                         },
-                        "details": {}
+                        "venue_type": {
+                          "type": "string"
+                        },
+                        "login_method": {
+                          "type": "string"
+                        },
+                        "locale": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -2912,24 +3008,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Venue"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -3153,24 +3240,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Venue"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -3385,24 +3463,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/RestaurantSettings"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -3626,24 +3695,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/RestaurantSettings"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -4166,24 +4226,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -4409,24 +4460,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -4650,24 +4692,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -4891,24 +4924,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -5152,24 +5181,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -5413,24 +5433,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -5922,24 +5933,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Area"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -6165,24 +6167,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Area"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -6414,24 +6407,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -6942,24 +6931,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Table"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -7200,24 +7180,18 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Table"
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -7443,24 +7417,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Table"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -7684,24 +7649,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Table"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -7925,24 +7881,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -8192,24 +8144,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Table"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -8943,24 +8886,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuCategory"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -9186,24 +9120,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuCategory"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -9427,24 +9352,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -9965,24 +9886,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuItem"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -10208,24 +10120,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuItem"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -10449,24 +10352,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuItem"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -10690,24 +10584,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -10951,24 +10841,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/MenuItem"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -11215,24 +11096,27 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "groupId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sortOrder": {
+                            "type": "integer"
+                          }
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -11729,24 +11613,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/ModifierGroup"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -11972,24 +11847,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/ModifierGroup"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -12213,24 +12079,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -12477,24 +12339,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/ModifierOption"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -12720,24 +12573,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/ModifierOption"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -12961,24 +12805,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -13997,24 +13837,15 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
+                    "data": {
+                      "$ref": "#/components/schemas/Order"
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -14781,24 +14612,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "deleted": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -15033,24 +14860,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "served": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -15840,24 +15663,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "served": {
+                          "type": "integer"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -17587,24 +17406,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "updated": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -17846,24 +17661,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "bumped": {
+                          "type": "integer"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -18089,24 +17900,20 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "error"
+                    "data",
+                    "meta"
                   ],
                   "properties": {
-                    "error": {
+                    "data": {
                       "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
                       "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
+                        "recalled": {
+                          "type": "boolean"
+                        }
                       }
+                    },
+                    "meta": {
+                      "type": "object"
                     }
                   }
                 }
@@ -18316,27 +18123,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "error"
-                  ],
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "properties": {
-                        "code": {
-                          "$ref": "#/components/schemas/ErrorCode"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "details": {}
-                      }
-                    }
-                  }
+                  "description": "This OpenAPI 3.1 document itself."
                 }
               }
             }

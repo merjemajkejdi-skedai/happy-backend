@@ -413,7 +413,7 @@ function op(summary: string, tags: string[], opts: Partial<{
     security: opts.security ?? bearerAuth,
     ...(opts.parameters ? { parameters: opts.parameters } : {}),
     ...(opts.requestBody ? { requestBody: { required: true, content: { 'application/json': { schema: opts.requestBody } } } } : {}),
-    responses: { '200': response('OK'), ...errorResponses, ...opts.responses },
+    responses: { '200': response('OK', envelope({ type: 'object' })), ...errorResponses, ...opts.responses },
   };
 }
 
@@ -440,7 +440,16 @@ const orderItemSchema = { $ref: '#/components/schemas/OrderItem' };
 
 const paths: Record<string, Record<string, object>> = {
   '/health': {
-    get: op('Liveness check', ['System'], { security: [], responses: { '200': response('OK') } }),
+    get: op('Liveness check', ['System'], {
+      security: [],
+      responses: {
+        '200': response('OK', {
+          type: 'object',
+          required: ['status', 'ts'],
+          properties: { status: { type: 'string', enum: ['ok'] }, ts: { type: 'string', format: 'date-time' } },
+        }),
+      },
+    }),
   },
 
   // ── Auth ─────────────────────────────────────────────────────────────────
@@ -448,7 +457,19 @@ const paths: Record<string, Record<string, object>> = {
     post: op('Log in with venue_slug + PIN', ['Auth'], {
       security: [],
       requestBody: { type: 'object', required: ['venue_slug', 'pin'], properties: { venue_slug: { type: 'string' }, pin: { type: 'string' } } },
-      responses: { '429': response('Rate limited — 10 attempts/min per venue_slug+IP', errorEnvelope) },
+      responses: {
+        '200': response('OK', envelope({
+        type: 'object',
+        properties: {
+          access_token: { type: 'string' },
+          refresh_token: { type: 'string' },
+          refresh_expires_at: { type: 'string', format: 'date-time' },
+          user: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, fullName: { type: 'string' }, email: { type: ['string', 'null'] }, role: { type: 'string' }, venueId: { type: 'string', format: 'uuid' } } },
+          venue: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, slug: { type: 'string' }, name: { type: 'string' }, venueType: { type: 'string' } } },
+        },
+      })),
+        '429': response('Rate limited — 10 attempts/min per venue_slug+IP', errorEnvelope),
+      },
     }),
   },
   '/auth/login/email': {
@@ -459,43 +480,91 @@ const paths: Record<string, Record<string, object>> = {
         required: ['venue_slug', 'email', 'password'],
         properties: { venue_slug: { type: 'string' }, email: { type: 'string' }, password: { type: 'string' } },
       },
-      responses: { '429': response('Rate limited — 10 attempts/min per venue_slug+IP', errorEnvelope) },
+      responses: {
+        '200': response('OK', envelope({
+        type: 'object',
+        properties: {
+          access_token: { type: 'string' },
+          refresh_token: { type: 'string' },
+          refresh_expires_at: { type: 'string', format: 'date-time' },
+          user: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, fullName: { type: 'string' }, email: { type: ['string', 'null'] }, role: { type: 'string' }, venueId: { type: 'string', format: 'uuid' } } },
+          venue: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, slug: { type: 'string' }, name: { type: 'string' }, venueType: { type: 'string' } } },
+        },
+      })),
+        '429': response('Rate limited — 10 attempts/min per venue_slug+IP', errorEnvelope),
+      },
     }),
   },
   '/auth/refresh': {
     post: op('Rotate an access/refresh token pair', ['Auth'], {
       security: [],
       requestBody: { type: 'object', required: ['refresh_token'], properties: { refresh_token: { type: 'string' } } },
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            access_token: { type: 'string' },
+            refresh_token: { type: 'string' },
+            refresh_expires_at: { type: 'string', format: 'date-time' },
+          },
+        })),
+      },
     }),
   },
   '/auth/logout': {
     post: op('Revoke a refresh token', ['Auth'], {
       requestBody: { type: 'object', required: ['refresh_token'], properties: { refresh_token: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { loggedOut: { type: 'boolean' } } })) },
     }),
   },
   '/auth/me': {
-    get: op('Current user + venue + settings', ['Auth']),
+    get: op('Current user + venue + settings', ['Auth'], {
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            user: { $ref: '#/components/schemas/User' },
+            venue: { $ref: '#/components/schemas/Venue' },
+            settings: { $ref: '#/components/schemas/RestaurantSettings' },
+          },
+        })),
+      },
+    }),
   },
   '/auth/venue-config': {
     get: op('Public venue lookup by slug — login_method, locale, currency only', ['Auth'], {
       security: [],
       parameters: [queryParam('slug')],
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            venue_type: { type: 'string' },
+            login_method: { type: 'string' },
+            locale: { type: 'string' },
+            currency: { type: 'string' },
+          },
+        })),
+      },
     }),
   },
 
   // ── Venue ────────────────────────────────────────────────────────────────
   '/venue': {
-    get: op('Get this venue', ['Venue']),
+    get: op('Get this venue', ['Venue'], { responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Venue' })) } }),
     patch: op('Update venue identity/contact fields (requires venue.write)', ['Venue'], {
       requestBody: { type: 'object', description: 'name, timezone, currency, locale, address, phone, is_active — venue_type is not editable.' },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Venue' })) },
     }),
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────
   '/settings': {
-    get: op('Get restaurant_settings', ['Settings']),
+    get: op('Get restaurant_settings', ['Settings'], { responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/RestaurantSettings' })) } }),
     patch: op('Update settings (requires settings.write) — validated against the merged current+patch state', ['Settings'], {
       requestBody: { type: 'object', description: 'Any subset of the editable settings fields.' },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/RestaurantSettings' })) },
     }),
   },
 
@@ -517,23 +586,35 @@ const paths: Record<string, Record<string, object>> = {
           pin: { type: 'string' },
         },
       },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
     }),
   },
   '/users/{id}': {
-    get: op('Get a staff account (requires user.manage)', ['Users'], { parameters: [pathParam('id', 'User id')] }),
-    patch: op('Update a staff account (requires user.manage)', ['Users'], { parameters: [pathParam('id', 'User id')] }),
-    delete: op('Soft-delete a staff account (requires user.manage)', ['Users'], { parameters: [pathParam('id', 'User id')] }),
+    get: op('Get a staff account (requires user.manage)', ['Users'], {
+      parameters: [pathParam('id', 'User id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
+    }),
+    patch: op('Update a staff account (requires user.manage)', ['Users'], {
+      parameters: [pathParam('id', 'User id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
+    }),
+    delete: op('Soft-delete a staff account (requires user.manage)', ['Users'], {
+      parameters: [pathParam('id', 'User id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
   '/users/{id}/reset-pin': {
     post: op('Reset a user\'s PIN (requires user.manage)', ['Users'], {
       parameters: [pathParam('id', 'User id')],
       requestBody: { type: 'object', required: ['pin'], properties: { pin: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
     }),
   },
   '/users/{id}/reset-password': {
     post: op('Reset a user\'s password (requires user.manage; user must have an email on file)', ['Users'], {
       parameters: [pathParam('id', 'User id')],
       requestBody: { type: 'object', required: ['password'], properties: { password: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
     }),
   },
 
@@ -545,12 +626,17 @@ const paths: Record<string, Record<string, object>> = {
     }),
     post: op('Create an area (requires table.write)', ['Areas'], {
       requestBody: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, default_destination: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Area' })) },
     }),
   },
   '/areas/{id}': {
-    patch: op('Update an area (requires table.write)', ['Areas'], { parameters: [pathParam('id', 'Area id')] }),
+    patch: op('Update an area (requires table.write)', ['Areas'], {
+      parameters: [pathParam('id', 'Area id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Area' })) },
+    }),
     delete: op('Soft-delete an area (requires table.write) — pass ?reassign_to= if it has active tables', ['Areas'], {
       parameters: [pathParam('id', 'Area id'), queryParam('reassign_to')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
     }),
   },
 
@@ -562,22 +648,34 @@ const paths: Record<string, Record<string, object>> = {
     }),
     post: op('Create a table (requires table.write)', ['Tables'], {
       requestBody: { type: 'object', properties: { area_id: { type: 'string' }, table_number: { type: 'integer' }, table_name: { type: 'string' }, seats: { type: 'integer' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Table' })) },
     }),
   },
   '/tables/bulk': {
     post: op('Bulk-create a numeric range of tables (requires table.write, max 500)', ['Tables'], {
       requestBody: { type: 'object', required: ['area_id', 'from', 'to'], properties: { area_id: { type: 'string' }, from: { type: 'integer' }, to: { type: 'integer' } } },
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/Table' } })) },
     }),
   },
   '/tables/{id}': {
-    get: op('Get a table', ['Tables'], { parameters: [pathParam('id', 'Table id')] }),
-    patch: op('Update a table (requires table.write)', ['Tables'], { parameters: [pathParam('id', 'Table id')] }),
-    delete: op('Soft-delete a table (requires table.write) — blocked if it has an active order', ['Tables'], { parameters: [pathParam('id', 'Table id')] }),
+    get: op('Get a table', ['Tables'], {
+      parameters: [pathParam('id', 'Table id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Table' })) },
+    }),
+    patch: op('Update a table (requires table.write)', ['Tables'], {
+      parameters: [pathParam('id', 'Table id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Table' })) },
+    }),
+    delete: op('Soft-delete a table (requires table.write) — blocked if it has an active order', ['Tables'], {
+      parameters: [pathParam('id', 'Table id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
   '/tables/{id}/status': {
     patch: op('Set a table\'s status directly (requires table.status)', ['Tables'], {
       parameters: [pathParam('id', 'Table id')],
       requestBody: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['free', 'occupied', 'reserved', 'dirty'] } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Table' })) },
     }),
   },
 
@@ -594,11 +692,18 @@ const paths: Record<string, Record<string, object>> = {
     }),
     post: op('Create a category (requires menu.write) — destination/course validated against venue_type/courses_enabled', ['Menu'], {
       requestBody: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, default_destination: { type: 'string' }, default_course_number: { type: 'integer' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuCategory' })) },
     }),
   },
   '/menu/categories/{id}': {
-    patch: op('Update a category (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Category id')] }),
-    delete: op('Soft-delete a category (requires menu.write) — 409 if it has active items', ['Menu'], { parameters: [pathParam('id', 'Category id')] }),
+    patch: op('Update a category (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Category id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuCategory' })) },
+    }),
+    delete: op('Soft-delete a category (requires menu.write) — 409 if it has active items', ['Menu'], {
+      parameters: [pathParam('id', 'Category id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
   '/menu/items': {
     get: op('List menu items', ['Menu'], {
@@ -607,23 +712,40 @@ const paths: Record<string, Record<string, object>> = {
     }),
     post: op('Create an item (requires menu.write) — destination/course inherit from the category unless overridden', ['Menu'], {
       requestBody: { type: 'object', required: ['category_id', 'name', 'price'], properties: { category_id: { type: 'string' }, name: { type: 'string' }, price: { type: 'number' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuItem' })) },
     }),
   },
   '/menu/items/{id}': {
-    get: op('Get a menu item', ['Menu'], { parameters: [pathParam('id', 'Item id')] }),
-    patch: op('Update an item (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Item id')] }),
-    delete: op('Soft-delete an item (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Item id')] }),
+    get: op('Get a menu item', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuItem' })) },
+    }),
+    patch: op('Update an item (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuItem' })) },
+    }),
+    delete: op('Soft-delete an item (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
   '/menu/items/{id}/availability': {
     patch: op('The "86" toggle (requires menu.availability — waiter, kitchen, and admin)', ['Menu'], {
       parameters: [pathParam('id', 'Item id')],
       requestBody: { type: 'object', required: ['is_available'], properties: { is_available: { type: 'boolean' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/MenuItem' })) },
     }),
   },
   '/menu/items/{id}/modifier-groups': {
     post: op('Replace the full set of modifier groups attached to this item (requires menu.write)', ['Menu'], {
       parameters: [pathParam('id', 'Item id')],
       requestBody: { type: 'object', required: ['group_ids'], properties: { group_ids: { type: 'array', items: { type: 'string' } } } },
+      responses: {
+        '200': response('OK', envelope({
+          type: 'array',
+          items: { type: 'object', properties: { groupId: { type: 'string', format: 'uuid' }, sortOrder: { type: 'integer' } } },
+        })),
+      },
     }),
   },
   '/menu/modifier-groups': {
@@ -633,21 +755,35 @@ const paths: Record<string, Record<string, object>> = {
     }),
     post: op('Create a modifier group (requires menu.write)', ['Menu'], {
       requestBody: { type: 'object', required: ['name', 'type'], properties: { name: { type: 'string' }, type: { type: 'string', enum: ['single', 'multiple'] } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/ModifierGroup' })) },
     }),
   },
   '/menu/modifier-groups/{id}': {
-    patch: op('Update a modifier group (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Group id')] }),
-    delete: op('Soft-delete a modifier group (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Group id')] }),
+    patch: op('Update a modifier group (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Group id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/ModifierGroup' })) },
+    }),
+    delete: op('Soft-delete a modifier group (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Group id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
   '/menu/modifier-groups/{id}/options': {
     post: op('Add an option to a group (requires menu.write)', ['Menu'], {
       parameters: [pathParam('id', 'Group id')],
       requestBody: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, price_delta: { type: 'number' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/ModifierOption' })) },
     }),
   },
   '/menu/modifier-options/{id}': {
-    patch: op('Update a modifier option (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Option id')] }),
-    delete: op('Soft-delete a modifier option (requires menu.write)', ['Menu'], { parameters: [pathParam('id', 'Option id')] }),
+    patch: op('Update a modifier option (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Option id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/ModifierOption' })) },
+    }),
+    delete: op('Soft-delete a modifier option (requires menu.write)', ['Menu'], {
+      parameters: [pathParam('id', 'Option id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
   },
 
   // ── Orders ───────────────────────────────────────────────────────────────
@@ -676,7 +812,10 @@ const paths: Record<string, Record<string, object>> = {
       parameters: [pathParam('id', 'Order id')],
       responses: { '200': response('OK', envelope(orderSchema)) },
     }),
-    patch: op('Update guest_count/customer_name/notes only (requires order.create)', ['Orders'], { parameters: [pathParam('id', 'Order id')] }),
+    patch: op('Update guest_count/customer_name/notes only (requires order.create)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id')],
+      responses: { '200': response('OK', envelope(orderSchema)) },
+    }),
   },
   '/orders/{id}/items': {
     post: op('Add an item to an order (requires order.create) — snapshots the menu at insert time', ['Orders'], {
@@ -703,11 +842,13 @@ const paths: Record<string, Record<string, object>> = {
     delete: op('Void an item — any waiter while pending; admin-only (order.void_after_send) once sent', ['Orders'], {
       parameters: [pathParam('id', 'Order id'), pathParam('itemId', 'Order item id')],
       requestBody: { type: 'object', properties: { reason: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
     }),
   },
   '/orders/{id}/items/{itemId}/serve': {
     patch: op('Mark one ready item served (requires order.serve)', ['Orders'], {
       parameters: [pathParam('id', 'Order id'), pathParam('itemId', 'Order item id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { served: { type: 'boolean' } } })) },
     }),
   },
   '/orders/{id}/send': {
@@ -736,6 +877,7 @@ const paths: Record<string, Record<string, object>> = {
     post: op('Bulk-serve ready items (requires order.serve) — defaults to all ready items', ['Orders'], {
       parameters: [pathParam('id', 'Order id')],
       requestBody: { type: 'object', properties: { item_ids: { type: 'array', items: { type: 'string' } } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { served: { type: 'integer' } } })) },
     }),
   },
   '/orders/{id}/close': {
@@ -786,22 +928,28 @@ const paths: Record<string, Record<string, object>> = {
     patch: op('Single valid-transition bump (requires display.bump) — sent->preparing, sent->ready, preparing->ready', ['Displays'], {
       parameters: [pathParam('itemId', 'Order item id')],
       requestBody: { type: 'object', required: ['status'], properties: { status: { type: 'string', enum: ['preparing', 'ready'] } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { updated: { type: 'boolean' } } })) },
     }),
   },
   '/displays/bump': {
     post: op('Bulk transition to ready in one transaction (requires display.bump) — explicit item_ids is all-or-nothing, order_id auto-resolves eligible items', ['Displays'], {
       requestBody: { type: 'object', properties: { order_item_ids: { type: 'array', items: { type: 'string' } }, order_id: { type: 'string' }, status: { type: 'string', enum: ['ready'] } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { bumped: { type: 'integer' } } })) },
     }),
   },
   '/displays/items/{itemId}/recall': {
     post: op('Un-bump a mistake: ready -> preparing, clears ready_at (requires display.bump)', ['Displays'], {
       parameters: [pathParam('itemId', 'Order item id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { recalled: { type: 'boolean' } } })) },
     }),
   },
 
   // ── OpenAPI ──────────────────────────────────────────────────────────────
   '/openapi.json': {
-    get: op('This document', ['System'], { security: [], responses: { '200': response('OK') } }),
+    get: op('This document', ['System'], {
+      security: [],
+      responses: { '200': response('OK', { type: 'object', description: 'This OpenAPI 3.1 document itself.' }) },
+    }),
   },
 };
 
