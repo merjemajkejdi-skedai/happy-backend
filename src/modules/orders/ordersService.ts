@@ -16,8 +16,19 @@ import {
 
 export type OrderResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
 
-function isConflict(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+// Narrowed to the specific partial unique index this check exists for
+// (orders_active_table_key on orders(table_id) WHERE status IN active...).
+// A bare `code === 'P2002'` would also match the unrelated
+// orders_venue_id_order_number_key constraint and mislabel that as a table
+// conflict — this is exactly the bug that made every create-order call fail
+// with TABLE_ALREADY_HAS_ACTIVE_ORDER after the venue's first business day,
+// before order_number allocation was fixed to never repeat (ticketNumbering.ts).
+function isTableConflict(e: unknown): boolean {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== 'P2002') return false;
+  const cause = (e.meta as { driverAdapterError?: { cause?: { constraint?: { fields?: string[] } } } } | undefined)
+    ?.driverAdapterError?.cause;
+  const fields = cause?.constraint?.fields;
+  return Array.isArray(fields) && fields.length === 1 && fields[0] === 'table_id';
 }
 
 // ── Totals + status — server-side, Decimal-only math, recomputed and
@@ -140,7 +151,7 @@ export async function createOrder(
     });
     return { ok: true, value: order };
   } catch (e) {
-    if (isConflict(e)) {
+    if (isTableConflict(e)) {
       return { ok: false, error: err(409, 'TABLE_ALREADY_HAS_ACTIVE_ORDER', 'This table already has an active order') };
     }
     throw e;
