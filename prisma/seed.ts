@@ -22,7 +22,7 @@ function pinLookup(pin: string): string {
 }
 
 const PASSWORD = 'Passw0rd!';
-const ROLE_PINS = { waiter: '1111', kitchen: '2222', admin: '3333' } as const;
+const ROLE_PINS = { waiter: '1111', kitchen: '2222', admin: '3333', manager: '4444', bar: '5555' } as const;
 
 // ── Idempotent upsert helpers ────────────────────────────────────────────────
 // Several uniqueness rules in this schema are partial unique indexes
@@ -120,7 +120,7 @@ async function upsertModifierOption(groupId: string, input: { name: string; pric
 
 async function upsertUser(
   venueId: string,
-  input: { role: 'waiter' | 'kitchen' | 'admin'; fullName: string; email: string },
+  input: { role: 'waiter' | 'kitchen' | 'admin' | 'manager' | 'bar'; fullName: string; email: string },
 ) {
   const pin = ROLE_PINS[input.role];
   const [passwordHash, pinHash] = await Promise.all([bcrypt.hash(PASSWORD, 10), bcrypt.hash(pin, 10)]);
@@ -133,7 +133,12 @@ async function upsertUser(
     isActive: true,
     deletedAt: null,
   };
-  const existing = await prisma.user.findFirst({ where: { venueId, role: input.role } });
+  // Pre-existing bug fixed here (2a-i): must scope to the active row only.
+  // Without deletedAt: null, this could match a stale soft-deleted duplicate
+  // instead of the current active user and then fail updating its email to
+  // one already held by the real active row — exactly the accumulated
+  // debris found live while seeding manager/bar users this session.
+  const existing = await prisma.user.findFirst({ where: { venueId, role: input.role, deletedAt: null } });
   if (existing) return prisma.user.update({ where: { id: existing.id }, data });
   return prisma.user.create({ data: { venueId, role: input.role, ...data } });
 }
@@ -170,6 +175,15 @@ interface VenueSpec {
     barDisplayEnabled: boolean;
     tableNamingMode: 'number' | 'name' | 'both';
     loginMethod: 'pin' | 'email' | 'both';
+    // Phase 2 (session 2a-i) — differentiated per venue so every new
+    // settings group has at least one venue exercising a non-default value.
+    sendByCourse?: boolean;
+    splitBillEnabled?: boolean;
+    splitEqualEnabled?: boolean;
+    splitByItemEnabled?: boolean;
+    mergeTablesEnabled?: boolean;
+    voidRequiresApproval?: boolean;
+    stockTrackingMode?: 'none' | 'count' | 'daily_limit';
   };
   areas: AreaSpec[];
   categories: CategorySpec[];
@@ -256,6 +270,10 @@ const VENUES: VenueSpec[] = [
       barDisplayEnabled: false,
       tableNamingMode: 'both',
       loginMethod: 'pin',
+      sendByCourse: true,
+      splitBillEnabled: true,
+      voidRequiresApproval: true,
+      stockTrackingMode: 'count',
     },
     areas: [
       {
@@ -310,6 +328,12 @@ const VENUES: VenueSpec[] = [
       barDisplayEnabled: true,
       tableNamingMode: 'name',
       loginMethod: 'both',
+      sendByCourse: false, // bar has no courses (coursesEnabled is already false)
+      splitBillEnabled: true,
+      splitEqualEnabled: true,
+      splitByItemEnabled: false, // split-equal only
+      voidRequiresApproval: false,
+      stockTrackingMode: 'none',
     },
     areas: [
       {
@@ -373,6 +397,12 @@ const VENUES: VenueSpec[] = [
       barDisplayEnabled: true,
       tableNamingMode: 'number',
       loginMethod: 'email',
+      sendByCourse: true,
+      splitBillEnabled: true,
+      splitEqualEnabled: true,
+      splitByItemEnabled: true,
+      mergeTablesEnabled: true,
+      stockTrackingMode: 'daily_limit',
     },
     areas: [
       {
@@ -422,10 +452,14 @@ async function seedVenue(spec: VenueSpec, summary: SummaryRow[]) {
     create: { venueId: venue.id, ...spec.settings },
   });
 
-  // Users — waiter, kitchen, admin. No manager/bar accounts (Phase 2 roles).
-  for (const role of ['waiter', 'kitchen', 'admin'] as const) {
+  // Users — waiter, kitchen, admin, manager, bar. manager/bar accounts now
+  // exist (2a-i) but their permissions/routes activate in session 2a-ii —
+  // creating them here is data only, no behavior change.
+  let managerUserId: string | undefined;
+  for (const role of ['waiter', 'kitchen', 'admin', 'manager', 'bar'] as const) {
     const email = `${role}@${spec.slug}.test`;
-    await upsertUser(venue.id, { role, fullName: `${role[0].toUpperCase()}${role.slice(1)} (${spec.name})`, email });
+    const user = await upsertUser(venue.id, { role, fullName: `${role[0].toUpperCase()}${role.slice(1)} (${spec.name})`, email });
+    if (role === 'manager') managerUserId = user.id;
     summary.push({ venue: spec.name, slug: spec.slug, role, email, pin: ROLE_PINS[role], password: PASSWORD });
   }
 
@@ -496,6 +530,18 @@ async function seedVenue(spec: VenueSpec, summary: SummaryRow[]) {
     update: {},
     create: { venueId: venue.id, businessDate: today },
   });
+
+  // One open shift per venue for today (Phase 2, 2a-i section 7). Idempotent:
+  // the partial unique index (venue_id) WHERE status = 'open' means a second
+  // run finds the existing open shift instead of colliding.
+  if (managerUserId) {
+    const existingOpenShift = await prisma.shift.findFirst({ where: { venueId: venue.id, status: 'open' } });
+    if (!existingOpenShift) {
+      await prisma.shift.create({
+        data: { venueId: venue.id, businessDate: today, openedByUserId: managerUserId, name: 'Seed Shift' },
+      });
+    }
+  }
 
   return venue;
 }

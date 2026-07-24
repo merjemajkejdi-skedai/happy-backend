@@ -60,7 +60,6 @@ async function setupOrdersFixture(): Promise<Fixture> {
           counterServiceEnabled: true,
           requireTableForOrder: false,
           allowFreeTextNotes: true,
-          requireReasonOnVoid: true,
           allowItemVoidAfterSend: false,
           autoSendOnAdd: false,
           taxRatePercent: 10,

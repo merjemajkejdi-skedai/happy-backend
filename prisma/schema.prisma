@@ -85,6 +85,7 @@ enum OrderStatus {
   served
   closed
   cancelled
+  merged
 
   @@map("order_status")
 }
@@ -107,6 +108,76 @@ enum ModifierType {
   @@map("modifier_type")
 }
 
+// ── Phase 2 enums ────────────────────────────────────────────────────────────
+
+enum ModifierPricing {
+  free
+  fixed
+  tiered
+
+  @@map("modifier_pricing")
+}
+
+enum CourseStatus {
+  pending
+  fired
+  preparing
+  ready
+  served
+
+  @@map("course_status")
+}
+
+enum SplitType {
+  equal
+  by_item
+  by_seat
+
+  @@map("split_type")
+}
+
+enum VoidStatus {
+  pending_approval
+  approved
+  rejected
+  auto_approved
+
+  @@map("void_status")
+}
+
+enum VoidStage {
+  before_send
+  after_send
+
+  @@map("void_stage")
+}
+
+enum PaymentMethod {
+  cash
+  card
+  bank_transfer
+  voucher
+  room_charge
+  other
+
+  @@map("payment_method")
+}
+
+enum StockMode {
+  none
+  count
+  daily_limit
+
+  @@map("stock_mode")
+}
+
+enum ShiftStatus {
+  open
+  closed
+
+  @@map("shift_status")
+}
+
 // ── Core ─────────────────────────────────────────────────────────────────────
 
 model Venue {
@@ -127,17 +198,27 @@ model Venue {
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 
-  settings       RestaurantSettings?
-  users          User[]
-  areas          Area[]
-  tables         RestaurantTable[]
-  menuCategories MenuCategory[]
-  menuItems      MenuItem[]
-  modifierGroups ModifierGroup[]
-  orders         Order[]
-  orderItems     OrderItem[]
-  ticketCounters TicketCounter[]
+  settings            RestaurantSettings?
+  users               User[]
+  areas               Area[]
+  tables              RestaurantTable[]
+  menuCategories      MenuCategory[]
+  menuItems           MenuItem[]
+  modifierGroups      ModifierGroup[]
+  orders              Order[]
+  orderItems          OrderItem[]
+  ticketCounters      TicketCounter[]
   idempotencyRequests IdempotencyRequest[]
+
+  // Phase 2
+  shifts           Shift[]
+  orderCourses     OrderCourse[]
+  voidLogs         RestaurantVoidLog[]
+  menuItemStocks   MenuItemStock[]
+  stockMovements   StockMovement[]
+  payments         Payment[]
+  shiftReports     ShiftReport[]
+  approvalRequests ApprovalRequest[]
 
   @@map("venues")
 }
@@ -163,7 +244,6 @@ model RestaurantSettings {
   ticketNumberReset     String      @default("daily") @map("ticket_number_reset") // 'daily' | 'never'
   requireTableForOrder  Boolean     @default(true) @map("require_table_for_order")
   allowTableTransfer    Boolean     @default(true) @map("allow_table_transfer")
-  allowOrderMerge       Boolean     @default(false) @map("allow_order_merge") // flag only, Phase 2 behavior
 
   // menu / courses
   coursesEnabled     Boolean @default(true) @map("courses_enabled")
@@ -182,7 +262,6 @@ model RestaurantSettings {
 
   // ordering
   allowItemVoidAfterSend Boolean @default(false) @map("allow_item_void_after_send")
-  requireReasonOnVoid    Boolean @default(true) @map("require_reason_on_void")
   autoSendOnAdd          Boolean @default(false) @map("auto_send_on_add")
 
   // optional integrations, OFF and invisible
@@ -197,6 +276,58 @@ model RestaurantSettings {
   taxRatePercent       Decimal @default(20.00) @map("tax_rate_percent") @db.Decimal(5, 2)
   serviceChargePercent Decimal @default(0.00) @map("service_charge_percent") @db.Decimal(5, 2)
   extra                Json    @default("{}") // escape hatch; NO business logic reads this in Phase 1
+
+  // ── Phase 2 ──────────────────────────────────────────────────────────────
+
+  // modifiers
+  modifierPricingMode       ModifierPricing @default(fixed) @map("modifier_pricing_mode")
+  modifierMaxGroupsPerItem  Int             @default(10) @map("modifier_max_groups_per_item") @db.SmallInt
+  requireModifierValidation Boolean         @default(true) @map("require_modifier_validation")
+
+  // courses
+  sendByCourse                     Boolean @default(false) @map("send_by_course")
+  courseNames                      Json    @default("[\"Starters\",\"Mains\",\"Desserts\"]") @map("course_names")
+  autoFireFirstCourse              Boolean @default(true) @map("auto_fire_first_course")
+  courseFireRequiresPreviousServed Boolean @default(false) @map("course_fire_requires_previous_served")
+  showFireAlertSeconds             Int     @default(30) @map("show_fire_alert_seconds")
+
+  // split
+  splitBillEnabled   Boolean @default(false) @map("split_bill_enabled")
+  splitEqualEnabled  Boolean @default(true) @map("split_equal_enabled")
+  splitByItemEnabled Boolean @default(true) @map("split_by_item_enabled")
+  splitMaxWays       Int     @default(8) @map("split_max_ways") @db.SmallInt
+
+  // merge
+  mergeTablesEnabled   Boolean @default(false) @map("merge_tables_enabled")
+  mergeRequiresManager Boolean @default(true) @map("merge_requires_manager")
+
+  // voids
+  voidRequiresApproval           Boolean  @default(false) @map("void_requires_approval")
+  voidApprovalRole               UserRole @default(manager) @map("void_approval_role")
+  voidBeforeSendRequiresApproval Boolean  @default(false) @map("void_before_send_requires_approval")
+  voidReasonRequired             Boolean  @default(true) @map("void_reason_required")
+  voidReasonPresetList           Json     @default("[\"Customer changed mind\",\"Wrong item\",\"Quality issue\",\"Kitchen error\",\"Staff error\"]") @map("void_reason_preset_list")
+  voidAlertsKitchen              Boolean  @default(true) @map("void_alerts_kitchen")
+
+  // stock
+  stockTrackingMode        StockMode @default(none) @map("stock_tracking_mode")
+  stockAuto86AtZero        Boolean   @default(true) @map("stock_auto_86_at_zero")
+  stockWarnThreshold       Int       @default(5) @map("stock_warn_threshold") @db.SmallInt
+  allowNegativeStock       Boolean   @default(false) @map("allow_negative_stock")
+  eightysixRequiresManager Boolean   @default(false) @map("eightysix_requires_manager")
+  eightysixResetsDaily     Boolean   @default(true) @map("eightysix_resets_daily")
+
+  // payments
+  paymentCaptureEnabled Boolean @default(true) @map("payment_capture_enabled")
+  paymentMethodsEnabled Json    @default("[\"cash\",\"card\"]") @map("payment_methods_enabled")
+  requirePaymentToClose Boolean @default(false) @map("require_payment_to_close")
+  allowPartialPayment   Boolean @default(true) @map("allow_partial_payment")
+
+  // shifts
+  shiftsEnabled           Boolean @default(true) @map("shifts_enabled")
+  shiftAutoCloseHours     Int     @default(24) @map("shift_auto_close_hours")
+  businessDayStartHour    Int     @default(5) @map("business_day_start_hour") @db.SmallInt
+  reportsVisibleToManager Boolean @default(true) @map("reports_visible_to_manager")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
@@ -222,13 +353,28 @@ model User {
   updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   deletedAt        DateTime? @map("deleted_at") @db.Timestamptz
 
-  refreshTokens    RefreshToken[]
-  ordersOpened     Order[]        @relation("OrdersOpenedBy")
-  ordersClosed     Order[]        @relation("OrdersClosedBy")
-  orderItemsAdded  OrderItem[]    @relation("OrderItemsAddedBy")
-  orderItemsVoided OrderItem[]    @relation("OrderItemsVoidedBy")
-  orderEvents      OrderEvent[]
+  refreshTokens       RefreshToken[]
+  ordersOpened        Order[]              @relation("OrdersOpenedBy")
+  ordersClosed        Order[]              @relation("OrdersClosedBy")
+  ordersMerged        Order[]              @relation("OrdersMergedBy")
+  orderItemsAdded     OrderItem[]          @relation("OrderItemsAddedBy")
+  orderItemsVoided    OrderItem[]          @relation("OrderItemsVoidedBy")
+  orderEvents         OrderEvent[]
   idempotencyRequests IdempotencyRequest[]
+
+  // Phase 2
+  shiftsOpened              Shift[]             @relation("ShiftsOpenedBy")
+  shiftsClosed              Shift[]             @relation("ShiftsClosedBy")
+  coursesFired              OrderCourse[]       @relation("CoursesFiredBy")
+  voidLogsRequested         RestaurantVoidLog[] @relation("VoidLogsRequestedBy")
+  voidLogsApproved          RestaurantVoidLog[] @relation("VoidLogsApprovedBy")
+  menuItemStock86edBy       MenuItemStock[]     @relation("MenuItemStock86edBy")
+  stockMovementsBy          StockMovement[]     @relation("StockMovementsBy")
+  paymentsTaken             Payment[]           @relation("PaymentsTakenBy")
+  paymentsVoided            Payment[]           @relation("PaymentsVoidedBy")
+  shiftReportsGenerated     ShiftReport[]       @relation("ShiftReportsGeneratedBy")
+  approvalRequestsRequested ApprovalRequest[]   @relation("ApprovalRequestsRequestedBy")
+  approvalRequestsResolved  ApprovalRequest[]   @relation("ApprovalRequestsResolvedBy")
 
   // Partial uniques (email/pin_lookup NULL-safe) + the password/pin CHECK are
   // hand-added to the generated migration SQL — Prisma has no declarative
@@ -344,42 +490,58 @@ model MenuItem {
   modifierGroups MenuItemModifierGroup[]
   orderItems     OrderItem[]
 
+  // Phase 2
+  stockRecords   MenuItemStock[]
+  stockMovements StockMovement[]
+
   // price >= 0 CHECK is hand-added — Prisma has no declarative CHECK support.
   @@unique([venueId, sku])
   @@map("menu_items")
 }
 
 model ModifierGroup {
-  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  venueId    String       @map("venue_id") @db.Uuid
-  venue      Venue        @relation(fields: [venueId], references: [id])
-  name       String
-  type       ModifierType @default(single)
-  isRequired Boolean      @default(false) @map("is_required")
-  minSelect  Int          @default(0) @map("min_select") @db.SmallInt
-  maxSelect  Int?         @map("max_select") @db.SmallInt
-  sortOrder  Int          @default(0) @map("sort_order")
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt  DateTime?    @map("deleted_at") @db.Timestamptz
+  id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId              String          @map("venue_id") @db.Uuid
+  venue                Venue           @relation(fields: [venueId], references: [id])
+  name                 String
+  type                 ModifierType    @default(single)
+  isRequired           Boolean         @default(false) @map("is_required")
+  minSelect            Int             @default(0) @map("min_select") @db.SmallInt
+  maxSelect            Int?            @map("max_select") @db.SmallInt
+  sortOrder            Int             @default(0) @map("sort_order")
+  // Phase 2
+  pricingMode          ModifierPricing @default(fixed) @map("pricing_mode")
+  appliesToDestination Destination?    @map("applies_to_destination")
+  displayStyle         String          @default("list") @map("display_style")
+  isActive             Boolean         @default(true) @map("is_active")
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt            DateTime?       @map("deleted_at") @db.Timestamptz
 
   options       ModifierOption[]
   menuItemLinks MenuItemModifierGroup[]
 
+  // Hand-added (Phase 2): CHECK(max_select IS NULL OR max_select >= min_select),
+  // CHECK(type <> 'single' OR max_select IS NULL OR max_select = 1) — see
+  // docs/phase2/SCHEMA-ADDITIONS.md.
   @@map("modifier_groups")
 }
 
 model ModifierOption {
-  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  groupId    String        @map("group_id") @db.Uuid
-  group      ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  name       String
-  priceDelta Decimal       @default(0) @map("price_delta") @db.Decimal(10, 2)
-  isActive   Boolean       @default(true) @map("is_active")
-  sortOrder  Int           @default(0) @map("sort_order")
-  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt  DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt  DateTime?     @map("deleted_at") @db.Timestamptz
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  groupId      String        @map("group_id") @db.Uuid
+  group        ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name         String
+  priceDelta   Decimal       @default(0) @map("price_delta") @db.Decimal(10, 2)
+  isActive     Boolean       @default(true) @map("is_active")
+  sortOrder    Int           @default(0) @map("sort_order")
+  // Phase 2
+  isDefault    Boolean       @default(false) @map("is_default")
+  stockTracked Boolean       @default(false) @map("stock_tracked")
+  tierPrices   Json?         @map("tier_prices")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt    DateTime?     @map("deleted_at") @db.Timestamptz
 
   orderItemModifiers OrderItemModifier[]
 
@@ -432,15 +594,41 @@ model Order {
   pmsFolioId         String?          @map("pms_folio_id") // schema only
   pmsRoomNumber      String?          @map("pms_room_number") // schema only
   pmsPostedAt        DateTime?        @map("pms_posted_at") @db.Timestamptz // schema only
+  // Phase 2
+  parentOrderId      String?          @map("parent_order_id") @db.Uuid
+  parentOrder        Order?           @relation("OrderSplitHierarchy", fields: [parentOrderId], references: [id])
+  childOrders        Order[]          @relation("OrderSplitHierarchy")
+  splitType          SplitType?       @map("split_type")
+  splitSequence      Int?             @map("split_sequence") @db.SmallInt
+  mergedIntoOrderId  String?          @map("merged_into_order_id") @db.Uuid
+  mergedIntoOrder    Order?           @relation("OrderMergeHierarchy", fields: [mergedIntoOrderId], references: [id])
+  mergedFromOrders   Order[]          @relation("OrderMergeHierarchy")
+  mergedAt           DateTime?        @map("merged_at") @db.Timestamptz
+  mergedByUserId     String?          @map("merged_by_user_id") @db.Uuid
+  mergedByUser       User?            @relation("OrdersMergedBy", fields: [mergedByUserId], references: [id])
+  // shiftId FK — wired now that Shift exists (was deferred earlier in this
+  // same session, per the spec's stated creation order).
+  shiftId            String?          @map("shift_id") @db.Uuid
+  shift              Shift?           @relation(fields: [shiftId], references: [id])
+  businessDate       DateTime?        @map("business_date") @db.Date
+  amountPaid         Decimal          @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  amountDue          Decimal          @default(0) @map("amount_due") @db.Decimal(10, 2)
+  currentCourseFired Int?             @map("current_course_fired") @db.SmallInt
   createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  items  OrderItem[]
-  events OrderEvent[]
+  items            OrderItem[]
+  events           OrderEvent[]
+  splitChildItems  OrderItem[]       @relation("OrderItemsSplitFrom")
+  orderCourses     OrderCourse[]
+  payments         Payment[]
+  approvalRequests ApprovalRequest[]
 
-  // CHECK enforcing service_mode <-> table_id/ticket_number pairing, and a
-  // partial unique index on table_id (one active order per table), are
-  // hand-added — see docs/SCHEMA.md.
+  // CHECK enforcing service_mode <-> table_id/ticket_number pairing is
+  // hand-added — see docs/SCHEMA.md. The partial unique index on table_id
+  // (one active order per table) is hand-added and was RELAXED in Phase 2
+  // session 2a-i to exclude split-bill child orders — see
+  // docs/phase2/SCHEMA-ADDITIONS.md.
   @@unique([venueId, orderNumber])
   @@map("orders")
 }
@@ -448,36 +636,51 @@ model Order {
 // Everything snapshotted at insert — menu price changes never touch an
 // existing order.
 model OrderItem {
-  id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId              String          @map("order_id") @db.Uuid
-  order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  venueId              String          @map("venue_id") @db.Uuid // denormalized for display queries
-  venue                Venue           @relation(fields: [venueId], references: [id])
-  menuItemId           String?         @map("menu_item_id") @db.Uuid // reference only
-  menuItem             MenuItem?       @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
-  itemNameSnapshot     String          @map("item_name_snapshot")
-  categoryNameSnapshot String          @map("category_name_snapshot")
-  unitPriceSnapshot    Decimal         @map("unit_price_snapshot") @db.Decimal(10, 2)
-  destinationSnapshot  Destination     @map("destination_snapshot")
-  courseNumberSnapshot Int?            @map("course_number_snapshot") @db.SmallInt
-  taxRateSnapshot      Decimal         @map("tax_rate_snapshot") @db.Decimal(5, 2)
-  quantity             Int             @db.SmallInt
-  modifiersTotal       Decimal         @default(0) @map("modifiers_total") @db.Decimal(10, 2)
-  lineTotal            Decimal         @map("line_total") @db.Decimal(10, 2)
-  status               OrderItemStatus @default(pending)
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId              String             @map("order_id") @db.Uuid
+  order                Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  venueId              String             @map("venue_id") @db.Uuid // denormalized for display queries
+  venue                Venue              @relation(fields: [venueId], references: [id])
+  menuItemId           String?            @map("menu_item_id") @db.Uuid // reference only
+  menuItem             MenuItem?          @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  itemNameSnapshot     String             @map("item_name_snapshot")
+  categoryNameSnapshot String             @map("category_name_snapshot")
+  unitPriceSnapshot    Decimal            @map("unit_price_snapshot") @db.Decimal(10, 2)
+  destinationSnapshot  Destination        @map("destination_snapshot")
+  courseNumberSnapshot Int?               @map("course_number_snapshot") @db.SmallInt
+  taxRateSnapshot      Decimal            @map("tax_rate_snapshot") @db.Decimal(5, 2)
+  quantity             Int                @db.SmallInt
+  modifiersTotal       Decimal            @default(0) @map("modifiers_total") @db.Decimal(10, 2)
+  lineTotal            Decimal            @map("line_total") @db.Decimal(10, 2)
+  status               OrderItemStatus    @default(pending)
   notes                String?
-  addedByUserId        String          @map("added_by_user_id") @db.Uuid
-  addedByUser          User            @relation("OrderItemsAddedBy", fields: [addedByUserId], references: [id])
-  sentAt               DateTime?       @map("sent_at") @db.Timestamptz
-  preparingAt          DateTime?       @map("preparing_at") @db.Timestamptz
-  readyAt              DateTime?       @map("ready_at") @db.Timestamptz
-  servedAt             DateTime?       @map("served_at") @db.Timestamptz
-  cancelledAt          DateTime?       @map("cancelled_at") @db.Timestamptz
-  cancelReason         String?         @map("cancel_reason")
-  voidByUserId         String?         @map("void_by_user_id") @db.Uuid
-  voidByUser           User?           @relation("OrderItemsVoidedBy", fields: [voidByUserId], references: [id])
-  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  addedByUserId        String             @map("added_by_user_id") @db.Uuid
+  addedByUser          User               @relation("OrderItemsAddedBy", fields: [addedByUserId], references: [id])
+  sentAt               DateTime?          @map("sent_at") @db.Timestamptz
+  preparingAt          DateTime?          @map("preparing_at") @db.Timestamptz
+  readyAt              DateTime?          @map("ready_at") @db.Timestamptz
+  servedAt             DateTime?          @map("served_at") @db.Timestamptz
+  cancelledAt          DateTime?          @map("cancelled_at") @db.Timestamptz
+  cancelReason         String?            @map("cancel_reason")
+  voidByUserId         String?            @map("void_by_user_id") @db.Uuid
+  voidByUser           User?              @relation("OrderItemsVoidedBy", fields: [voidByUserId], references: [id])
+  // Phase 2. courseNumber is the waiter's ASSIGNED fire target — distinct from
+  // courseNumberSnapshot above, which records what the menu said at add-time.
+  // Both are kept; never merge them.
+  courseNumber         Int?               @map("course_number") @db.SmallInt
+  courseFiredAt        DateTime?          @map("course_fired_at") @db.Timestamptz
+  seatNumber           Int?               @map("seat_number") @db.SmallInt
+  splitFromOrderId     String?            @map("split_from_order_id") @db.Uuid
+  splitFromOrder       Order?             @relation("OrderItemsSplitFrom", fields: [splitFromOrderId], references: [id])
+  originalOrderItemId  String?            @map("original_order_item_id") @db.Uuid
+  originalOrderItem    OrderItem?         @relation("OrderItemSplitLineage", fields: [originalOrderItemId], references: [id])
+  splitLineageChildren OrderItem[]        @relation("OrderItemSplitLineage")
+  // voidId FK — wired now that restaurant_void_log exists (was deferred
+  // earlier in this same session, per the spec's stated creation order).
+  voidId               String?            @map("void_id") @db.Uuid
+  voidLog              RestaurantVoidLog? @relation("OrderItemVoidLog", fields: [voidId], references: [id])
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   modifiers OrderItemModifier[]
   events    OrderEvent[]
@@ -564,4 +767,256 @@ model IdempotencyRequest {
 
   @@unique([venueId, userId, route, idempotencyKey])
   @@map("idempotency_requests")
+}
+
+// ── Phase 2 (session 2a-i) ───────────────────────────────────────────────────
+// Full plain-English definitions in docs/phase2/SCHEMA-ADDITIONS.md. None of
+// these tables are soft-deletable. Creation order matters: Shift is declared
+// first because RestaurantVoidLog and Payment reference it.
+
+model Shift {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId            String      @map("venue_id") @db.Uuid
+  venue              Venue       @relation(fields: [venueId], references: [id])
+  businessDate       DateTime    @map("business_date") @db.Date
+  name               String?
+  status             ShiftStatus @default(open)
+  openedAt           DateTime    @default(now()) @map("opened_at") @db.Timestamptz
+  openedByUserId     String      @map("opened_by_user_id") @db.Uuid
+  openedByUser       User        @relation("ShiftsOpenedBy", fields: [openedByUserId], references: [id])
+  closedAt           DateTime?   @map("closed_at") @db.Timestamptz
+  closedByUserId     String?     @map("closed_by_user_id") @db.Uuid
+  closedByUser       User?       @relation("ShiftsClosedBy", fields: [closedByUserId], references: [id])
+  openingFloat       Decimal     @default(0) @map("opening_float") @db.Decimal(10, 2)
+  closingCashCounted Decimal?    @map("closing_cash_counted") @db.Decimal(10, 2)
+  cashVariance       Decimal?    @map("cash_variance") @db.Decimal(10, 2)
+  notes              String?
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  orders       Order[]
+  voidLogs     RestaurantVoidLog[]
+  payments     Payment[]
+  shiftReports ShiftReport[]
+
+  // Partial UNIQUE(venue_id) WHERE status = 'open' — the enforcement
+  // mechanism for one open shift per venue — is hand-added, Prisma has no
+  // declarative partial-unique support. See docs/phase2/SCHEMA-ADDITIONS.md.
+  @@index([venueId, businessDate])
+  @@map("shifts")
+}
+
+// Fire state per course per order — needed as its own table because "which
+// courses have fired" can't be inferred from item timestamps when a course
+// has zero items.
+model OrderCourse {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId            String       @map("venue_id") @db.Uuid
+  venue              Venue        @relation(fields: [venueId], references: [id])
+  orderId            String       @map("order_id") @db.Uuid
+  order              Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courseNumber       Int          @map("course_number") @db.SmallInt
+  // Copied from settings.course_names at row creation — renaming courses
+  // later must not rewrite history.
+  courseNameSnapshot String       @map("course_name_snapshot")
+  status             CourseStatus @default(pending)
+  firedAt            DateTime?    @map("fired_at") @db.Timestamptz
+  firedByUserId      String?      @map("fired_by_user_id") @db.Uuid
+  firedByUser        User?        @relation("CoursesFiredBy", fields: [firedByUserId], references: [id])
+  firstReadyAt       DateTime?    @map("first_ready_at") @db.Timestamptz
+  allServedAt        DateTime?    @map("all_served_at") @db.Timestamptz
+  itemCount          Int          @default(0) @map("item_count") @db.SmallInt
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([orderId, courseNumber])
+  @@index([venueId, status, firedAt])
+  @@map("order_courses")
+}
+
+// Standalone reporting table. Deliberately NO cascade/FK from orders or
+// order_items — order_id/order_item_id are plain denormalized columns (same
+// convention already used for order_events.venue_id) so this survives their
+// deletion; names are snapshotted for the same reason.
+model RestaurantVoidLog {
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId              String      @map("venue_id") @db.Uuid
+  venue                Venue       @relation(fields: [venueId], references: [id])
+  businessDate         DateTime    @map("business_date") @db.Date
+  shiftId              String?     @map("shift_id") @db.Uuid
+  shift                Shift?      @relation(fields: [shiftId], references: [id])
+  orderId              String      @map("order_id") @db.Uuid // no FK — must survive order deletion
+  orderNumber          Int         @map("order_number")
+  orderItemId          String?     @map("order_item_id") @db.Uuid // no FK — must survive order_item deletion
+  itemNameSnapshot     String      @map("item_name_snapshot")
+  categoryNameSnapshot String      @map("category_name_snapshot")
+  quantity             Int         @db.SmallInt
+  unitPriceSnapshot    Decimal     @map("unit_price_snapshot") @db.Decimal(10, 2)
+  // = quantity * (unit_price_snapshot + modifiers_total)
+  voidValue            Decimal     @map("void_value") @db.Decimal(10, 2)
+  destinationSnapshot  Destination @map("destination_snapshot")
+  stage                VoidStage
+  status               VoidStatus
+  reasonCode           String?     @map("reason_code")
+  reasonText           String?     @map("reason_text")
+  requestedByUserId    String      @map("requested_by_user_id") @db.Uuid
+  requestedByUser      User        @relation("VoidLogsRequestedBy", fields: [requestedByUserId], references: [id])
+  requestedByName      String      @map("requested_by_name")
+  approvedByUserId     String?     @map("approved_by_user_id") @db.Uuid
+  approvedByUser       User?       @relation("VoidLogsApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedByName       String?     @map("approved_by_name")
+  requestedAt          DateTime    @default(now()) @map("requested_at") @db.Timestamptz
+  resolvedAt           DateTime?   @map("resolved_at") @db.Timestamptz
+  rejectionReason      String?     @map("rejection_reason")
+  kitchenNotifiedAt    DateTime?   @map("kitchen_notified_at") @db.Timestamptz
+  tableLabelSnapshot   String?     @map("table_label_snapshot")
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  voidedOrderItems OrderItem[] @relation("OrderItemVoidLog")
+
+  // Partial index (venue_id, status) WHERE status = 'pending_approval' is
+  // hand-added. See docs/phase2/SCHEMA-ADDITIONS.md.
+  @@index([venueId, businessDate])
+  @@index([venueId, shiftId])
+  @@map("restaurant_void_log")
+}
+
+// Separate from menu_items so per-order stock churn doesn't write to the
+// menu table. menu_items.is_available (Phase 1) stays the manual non-dated
+// switch; is_86ed here is the dated service-level switch — both are
+// consulted, never conflated.
+model MenuItemStock {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId             String    @map("venue_id") @db.Uuid
+  venue               Venue     @relation(fields: [venueId], references: [id])
+  menuItemId          String    @map("menu_item_id") @db.Uuid
+  menuItem            MenuItem  @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  businessDate        DateTime  @map("business_date") @db.Date
+  mode                StockMode
+  startingQuantity    Int?      @map("starting_quantity")
+  currentQuantity     Int?      @map("current_quantity")
+  reservedQuantity    Int       @default(0) @map("reserved_quantity")
+  is86ed              Boolean   @default(false) @map("is_86ed")
+  eightysixedAt       DateTime? @map("eightysixed_at") @db.Timestamptz
+  eightysixedByUserId String?   @map("eightysixed_by_user_id") @db.Uuid
+  eightysixedByUser   User?     @relation("MenuItemStock86edBy", fields: [eightysixedByUserId], references: [id])
+  eightysixReason     String?   @map("eightysix_reason")
+  restoredAt          DateTime? @map("restored_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([menuItemId, businessDate])
+  @@index([venueId, businessDate, is86ed])
+  @@map("menu_item_stock")
+}
+
+// Append-only — no updated_at, rows are never modified (same convention as
+// order_events). reason is one of: 'order', 'void', 'manual_adjust',
+// 'restock', 'day_open'.
+model StockMovement {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId      String   @map("venue_id") @db.Uuid
+  venue        Venue    @relation(fields: [venueId], references: [id])
+  menuItemId   String   @map("menu_item_id") @db.Uuid
+  menuItem     MenuItem @relation(fields: [menuItemId], references: [id])
+  businessDate DateTime @map("business_date") @db.Date
+  delta        Int
+  reason       String
+  orderItemId  String?  @map("order_item_id") @db.Uuid // no FK — plain reference
+  actorUserId  String?  @map("actor_user_id") @db.Uuid
+  actorUser    User?    @relation("StockMovementsBy", fields: [actorUserId], references: [id])
+  balanceAfter Int      @map("balance_after")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([venueId, menuItemId, businessDate])
+  @@map("stock_movements")
+}
+
+// Capture only — no processing, no gateway, no card data. `reference` holds
+// a voucher code, last-4 digits, or free text; never a full card number.
+model Payment {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId        String        @map("venue_id") @db.Uuid
+  venue          Venue         @relation(fields: [venueId], references: [id])
+  orderId        String        @map("order_id") @db.Uuid
+  order          Order         @relation(fields: [orderId], references: [id])
+  shiftId        String?       @map("shift_id") @db.Uuid
+  shift          Shift?        @relation(fields: [shiftId], references: [id])
+  businessDate   DateTime      @map("business_date") @db.Date
+  method         PaymentMethod
+  amount         Decimal       @db.Decimal(10, 2) // CHECK(amount > 0) hand-added
+  tipAmount      Decimal       @default(0) @map("tip_amount") @db.Decimal(10, 2)
+  receivedAmount Decimal?      @map("received_amount") @db.Decimal(10, 2)
+  changeAmount   Decimal?      @map("change_amount") @db.Decimal(10, 2)
+  reference      String?
+  takenByUserId  String        @map("taken_by_user_id") @db.Uuid
+  takenByUser    User          @relation("PaymentsTakenBy", fields: [takenByUserId], references: [id])
+  takenByName    String        @map("taken_by_name")
+  isVoided       Boolean       @default(false) @map("is_voided")
+  voidedByUserId String?       @map("voided_by_user_id") @db.Uuid
+  voidedByUser   User?         @relation("PaymentsVoidedBy", fields: [voidedByUserId], references: [id])
+  voidedReason   String?       @map("voided_reason")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([venueId, businessDate, method])
+  @@index([orderId])
+  @@map("payments")
+}
+
+// Materialized snapshot so a closed shift's numbers never drift. `payload`
+// holds the full computed report — session 2h-i defines its structure, this
+// session only creates the column.
+model ShiftReport {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId           String   @map("venue_id") @db.Uuid
+  venue             Venue    @relation(fields: [venueId], references: [id])
+  shiftId           String?  @map("shift_id") @db.Uuid
+  shift             Shift?   @relation(fields: [shiftId], references: [id])
+  periodStart       DateTime @map("period_start") @db.Timestamptz
+  periodEnd         DateTime @map("period_end") @db.Timestamptz
+  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  generatedByUserId String   @map("generated_by_user_id") @db.Uuid
+  generatedByUser   User     @relation("ShiftReportsGeneratedBy", fields: [generatedByUserId], references: [id])
+  payload           Json
+  isFinal           Boolean  @default(false) @map("is_final")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([venueId, periodStart, periodEnd])
+  @@index([shiftId])
+  @@map("shift_reports")
+}
+
+// Generic by design — void approval is the only Phase 2 consumer; discount
+// and comp approvals land in Phase 3 without a schema change. request_type
+// is 'void' in Phase 2; subject_id points at restaurant_void_log.id (not a
+// FK — genuinely polymorphic across future request_type values). Reuses
+// void_status rather than defining a parallel enum.
+model ApprovalRequest {
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId           String     @map("venue_id") @db.Uuid
+  venue             Venue      @relation(fields: [venueId], references: [id])
+  requestType       String     @map("request_type")
+  subjectId         String     @map("subject_id") @db.Uuid // no FK — polymorphic
+  orderId           String?    @map("order_id") @db.Uuid
+  order             Order?     @relation(fields: [orderId], references: [id])
+  status            VoidStatus @default(pending_approval)
+  requestedByUserId String     @map("requested_by_user_id") @db.Uuid
+  requestedByUser   User       @relation("ApprovalRequestsRequestedBy", fields: [requestedByUserId], references: [id])
+  requiredRole      UserRole   @map("required_role")
+  resolvedByUserId  String?    @map("resolved_by_user_id") @db.Uuid
+  resolvedByUser    User?      @relation("ApprovalRequestsResolvedBy", fields: [resolvedByUserId], references: [id])
+  requestedAt       DateTime   @default(now()) @map("requested_at") @db.Timestamptz
+  resolvedAt        DateTime?  @map("resolved_at") @db.Timestamptz
+  expiresAt         DateTime?  @map("expires_at") @db.Timestamptz
+  payload           Json       @default("{}")
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Partial index (venue_id, status) WHERE status = 'pending_approval' is
+  // hand-added. See docs/phase2/SCHEMA-ADDITIONS.md.
+  @@index([requestType, subjectId])
+  @@map("approval_requests")
 }

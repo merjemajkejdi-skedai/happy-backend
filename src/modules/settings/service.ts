@@ -6,13 +6,18 @@ import type { ErrorCode } from '../../shared/errorCodes';
 const EDITABLE_FIELDS = [
   'loginMethod', 'pinLength', 'sessionTimeoutMinutes', 'requirePinOnReopen',
   'tableNamingMode', 'tablesEnabled', 'counterServiceEnabled', 'ticketNumberPrefix',
-  'ticketNumberReset', 'requireTableForOrder', 'allowTableTransfer', 'allowOrderMerge',
+  'ticketNumberReset', 'requireTableForOrder', 'allowTableTransfer',
   'coursesEnabled', 'defaultCourseCount', 'modifiersEnabled', 'allowFreeTextNotes',
   'kitchenDisplayEnabled', 'barDisplayEnabled', 'kitchenPrinterEnabled', 'barPrinterEnabled',
   'displayAutoRefreshSeconds', 'displayShowElapsedTime', 'displayWarnAfterMinutes',
-  'allowItemVoidAfterSend', 'requireReasonOnVoid', 'autoSendOnAdd',
+  'allowItemVoidAfterSend', 'autoSendOnAdd',
   'whatsappEnabled', 'whatsappConfig', 'aiEnabled', 'aiConfig',
   'pmsEnabled', 'pmsRoomChargeEnabled', 'taxRatePercent', 'serviceChargePercent', 'extra',
+  // allowOrderMerge / requireReasonOnVoid removed (2a-i section 3 — replaced
+  // by mergeTablesEnabled / voidReasonRequired). Phase 2's new settings
+  // columns are NOT added to this whitelist here — exposing them via
+  // PATCH /settings is route/service work for a later Phase 2 session, not
+  // this one (database only). See docs/phase2/SESSION-2a-i.md.
 ] as const;
 
 export type SettingsPatchInput = Partial<Record<(typeof EDITABLE_FIELDS)[number], unknown>>;

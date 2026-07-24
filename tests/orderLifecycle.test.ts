@@ -48,7 +48,6 @@ async function setupLifecycleFixture(): Promise<Fixture> {
           counterServiceEnabled: true,
           requireTableForOrder: false,
           allowTableTransfer: true,
-          requireReasonOnVoid: false,
           taxRatePercent: 10,
           serviceChargePercent: 0,
         },

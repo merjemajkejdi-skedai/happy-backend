@@ -319,7 +319,7 @@ export async function voidItem(
     }
   }
 
-  if (settings.requireReasonOnVoid && !input.reason?.trim()) {
+  if (settings.voidReasonRequired && !input.reason?.trim()) {
     return { ok: false, error: err(422, 'VOID_REASON_REQUIRED', 'A reason is required to void this item') };
   }
 
