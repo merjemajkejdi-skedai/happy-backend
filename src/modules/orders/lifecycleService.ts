@@ -1,6 +1,7 @@
 import { scopedPrisma } from '../../middleware/venueScope';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { recomputeOrder } from './ordersService';
+import { courseNameFromSettings } from './statusMachine';
 import { roleHasPermission } from '../../shared/permissions';
 import { Prisma, type Order, type OrderItem, type UserRole } from '../../generated/prisma/client';
 
@@ -76,17 +77,33 @@ export async function sendItems(
   const order = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
   if (!order) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
 
-  const { settings } = await getVenueAndSettings(venueId);
+  const { venue, settings } = await getVenueAndSettings(venueId);
+
+  // Phase 2, session 2c: a plain "send everything" call (no explicit
+  // course_number/item_ids) on a venue's very first send auto-fires course 1
+  // instead, when auto_fire_first_course is on. Implemented inline here
+  // (mirroring coursesService.fireCourse's course-1 case) rather than
+  // importing coursesService, to avoid a lifecycleService <-> coursesService
+  // circular import (coursesService already depends on sendItemsCore below).
+  const isPlainSend = input.courseNumber == null && !input.itemIds;
+  const shouldAutoFireCourse1 =
+    isPlainSend && !order.firstSentAt && settings.sendByCourse && settings.autoFireFirstCourse && venue.venueType !== 'happy_bar';
 
   const pendingItems = await scopedPrisma.orderItem.findMany({ where: { orderId, venueId, status: 'pending' } });
   let eligible = pendingItems;
-  if (input.courseNumber != null && settings.coursesEnabled) {
+  if (shouldAutoFireCourse1) {
+    eligible = eligible.filter(i => i.courseNumber === 1);
+  } else if (input.courseNumber != null && settings.coursesEnabled) {
     eligible = eligible.filter(i => i.courseNumberSnapshot === input.courseNumber);
   } else if (input.itemIds) {
     const idSet = new Set(input.itemIds);
     eligible = eligible.filter(i => idSet.has(i.id));
   }
-  if (eligible.length === 0) return { ok: false, error: err(422, 'NO_PENDING_ITEMS', 'There are no pending items to send') };
+  // An auto-fired empty course 1 is a no-op success, not an error — same
+  // convention as explicitly firing an empty course via the courses routes.
+  if (eligible.length === 0 && !shouldAutoFireCourse1) {
+    return { ok: false, error: err(422, 'NO_PENDING_ITEMS', 'There are no pending items to send') };
+  }
 
   const summary = await scopedPrisma.$transaction(async tx => {
     const sentItems = await sendItemsCore(tx, venueId, orderId, actorUserId, eligible.map(i => i.id));
@@ -94,6 +111,27 @@ export async function sendItems(
     await tx.orderEvent.create({
       data: { venueId, orderId, eventType: 'order.sent', actorUserId, payload: result as unknown as Prisma.InputJsonValue },
     });
+
+    if (shouldAutoFireCourse1) {
+      const now = new Date();
+      if (eligible.length > 0) {
+        await tx.orderItem.updateMany({ where: { id: { in: eligible.map(i => i.id) }, venueId }, data: { courseFiredAt: now } });
+      }
+      const course =
+        (await tx.orderCourse.findUnique({ where: { orderId_courseNumber: { orderId, courseNumber: 1 } } })) ??
+        (await tx.orderCourse.create({
+          data: { venueId, orderId, courseNumber: 1, courseNameSnapshot: courseNameFromSettings(settings.courseNames, 1) },
+        }));
+      await tx.orderCourse.update({ where: { id: course.id }, data: { status: 'fired', firedAt: now, firedByUserId: actorUserId } });
+
+      const currentOrder = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+      await tx.order.update({ where: { id: orderId }, data: { currentCourseFired: Math.max(currentOrder.currentCourseFired ?? 0, 1) } });
+
+      await tx.orderEvent.create({
+        data: { venueId, orderId, eventType: 'course.fired', actorUserId, payload: { courseNumber: 1, itemIds: eligible.map(i => i.id), auto: true } },
+      });
+    }
+
     return result;
   });
   return { ok: true, value: summary };

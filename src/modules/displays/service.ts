@@ -3,7 +3,8 @@ import { prisma } from '../../db/prisma';
 import { computeDisplayLabel } from '../tables/service';
 import { err, type OrderDomainError } from '../orders/validation';
 import { recomputeOrder } from '../orders/ordersService';
-import { buildTicket, buildMeta, type DisplayTicketDTO, type DisplayMetaDTO } from './serializers';
+import { checkCoursesAvailable } from '../orders/coursesService';
+import { buildTicket, buildMeta, buildFireAlert, type DisplayTicketDTO, type DisplayMetaDTO, type FireAlertDTO } from './serializers';
 import { Prisma, type OrderItem, type OrderItemModifier, type OrderItemStatus, type Destination } from '../../generated/prisma/client';
 
 export type DisplayResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
@@ -85,7 +86,7 @@ export async function getDisplay(
   venueId: string,
   destination: Extract<Destination, 'kitchen' | 'bar'>,
   params: GetDisplayParams,
-): Promise<DisplayResult<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO }>> {
+): Promise<DisplayResult<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO; fireAlerts: FireAlertDTO[] }>> {
   const settings = await getSettings(venueId);
   const enabled = destination === 'kitchen' ? settings.kitchenDisplayEnabled : settings.barDisplayEnabled;
   if (!enabled) return { ok: false, error: err(403, 'DISPLAY_DISABLED', `The ${destination} display is not enabled for this venue`) };
@@ -95,8 +96,8 @@ export async function getDisplay(
   if (params.courseNumber != null) where.courseNumberSnapshot = params.courseNumber;
 
   const now = new Date();
-  const tickets = await buildTickets(venueId, where, now);
-  return { ok: true, value: { tickets, meta: buildMeta(settings.displayAutoRefreshSeconds, tickets, now) } };
+  const [tickets, fireAlerts] = await Promise.all([buildTickets(venueId, where, now), getEmbeddedFireAlerts(venueId)]);
+  return { ok: true, value: { tickets, meta: buildMeta(settings.displayAutoRefreshSeconds, tickets, now), fireAlerts } };
 }
 
 export async function getRecallDisplay(venueId: string): Promise<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO }> {
@@ -223,5 +224,58 @@ export async function recallItem(venueId: string, actorUserId: string, itemId: s
     await recomputeOrder(tx, venueId, item.orderId);
   });
 
+  return { ok: true, value: null };
+}
+
+// ── Fire alerts (Phase 2, session 2c) ───────────────────────────────────────
+
+async function buildFireAlerts(venueId: string): Promise<FireAlertDTO[]> {
+  const settings = await getSettings(venueId);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - settings.showFireAlertSeconds * 1000);
+
+  const courses = await scopedPrisma.orderCourse.findMany({
+    where: { venueId, firedAt: { not: null, gte: cutoff }, fireAlertAckedAt: null },
+    orderBy: { firedAt: 'desc' },
+  });
+  if (courses.length === 0) return [];
+
+  const orderIds = [...new Set(courses.map(c => c.orderId))];
+  const orders = await scopedPrisma.order.findMany({ where: { id: { in: orderIds }, venueId } });
+  const ordersById = new Map(orders.map(o => [o.id, o]));
+
+  const tableIds = [...new Set(orders.map(o => o.tableId).filter((x): x is string => !!x))];
+  const tables = tableIds.length ? await scopedPrisma.restaurantTable.findMany({ where: { id: { in: tableIds }, venueId } }) : [];
+  const tableById = new Map(tables.map(t => [t.id, t]));
+
+  return courses
+    .map(course => {
+      const order = ordersById.get(course.orderId);
+      if (!order) return null;
+      const table = order.tableId ? (tableById.get(order.tableId) ?? null) : null;
+      return buildFireAlert(course, order, table, settings.tableNamingMode, settings.showFireAlertSeconds);
+    })
+    .filter((a): a is FireAlertDTO => !!a);
+}
+
+// Unconditional — embedded into the existing (ungated) kitchen/bar ticket
+// responses. Naturally empty for a venue that can never fire a course
+// (happy_bar), so no availability gate is needed here; the standalone route
+// below does gate, since it's one of the routes the 2c availability rule
+// names explicitly.
+export async function getEmbeddedFireAlerts(venueId: string): Promise<FireAlertDTO[]> {
+  return buildFireAlerts(venueId);
+}
+
+export async function getFireAlerts(venueId: string): Promise<DisplayResult<FireAlertDTO[]>> {
+  const gate = await checkCoursesAvailable(venueId);
+  if (!gate.ok) return gate;
+  return { ok: true, value: await buildFireAlerts(venueId) };
+}
+
+export async function ackFireAlert(venueId: string, courseId: string): Promise<DisplayResult<null>> {
+  const course = await scopedPrisma.orderCourse.findFirst({ where: { id: courseId, venueId } });
+  if (!course) return { ok: false, error: err(404, 'NOT_FOUND', 'Fire alert not found') };
+  await scopedPrisma.orderCourse.update({ where: { id: courseId }, data: { fireAlertAckedAt: new Date() } });
   return { ok: true, value: null };
 }

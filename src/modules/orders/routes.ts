@@ -11,6 +11,7 @@ import * as ordersService from './ordersService';
 import { serializeOrder } from './serializers';
 import { orderItemsRouter } from './orderItemsRoutes';
 import { lifecycleRouter } from './lifecycleRoutes';
+import { coursesRouter } from './coursesRoutes';
 import type { OrderStatus, ServiceMode } from '../../generated/prisma/client';
 
 export const ordersRouter = Router();
@@ -112,3 +113,4 @@ ordersRouter.patch('/:id', requirePermission('order.create'), async (req: Reques
 
 ordersRouter.use('/:id/items', orderItemsRouter);
 ordersRouter.use('/:id', lifecycleRouter);
+ordersRouter.use('/:id', coursesRouter);

@@ -11,6 +11,11 @@ const VENUE_SCOPED_MODELS = new Set([
   'RestaurantSettings', 'User', 'Area', 'RestaurantTable', 'MenuCategory',
   'MenuItem', 'ModifierGroup', 'Order', 'OrderItem', 'OrderEvent', 'TicketCounter',
   'IdempotencyRequest',
+  // OrderCourse has its own venue_id column (unlike OrderItemModifier, which
+  // is only reachable via order_item) but was missed when the model was
+  // added in session 2a-i — found while building session 2c's course-firing
+  // routes, the first code to query it directly by venue.
+  'OrderCourse',
 ]);
 
 // Operations that scan or bulk-touch rows — this is where "forgot to filter

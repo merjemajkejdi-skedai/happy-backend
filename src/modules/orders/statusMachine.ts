@@ -1,4 +1,4 @@
-import type { OrderItemStatus, OrderStatus } from '../../generated/prisma/client';
+import type { CourseStatus, OrderItemStatus, OrderStatus } from '../../generated/prisma/client';
 
 export type ExplicitOrderFlag = 'closed' | 'cancelled' | null | undefined;
 
@@ -22,4 +22,30 @@ export function deriveOrderStatus(items: { status: OrderItemStatus }[], explicit
   // least one item past 'pending' (otherwise the 'open' branch above would
   // already have matched) and nothing served yet.
   return 'sent';
+}
+
+// Phase 2, session 2c — course_status roll-up. A course only progresses past
+// 'pending' once explicitly fired (fireCourse sets 'fired' directly, outside
+// this function); this function only rolls a *fired* course forward toward
+// preparing/ready/served as its items progress, and never invents a status
+// on a course nobody has fired yet.
+export function deriveCourseStatus(currentStatus: CourseStatus, activeItems: { status: OrderItemStatus }[]): CourseStatus {
+  if (currentStatus === 'pending') return 'pending';
+  if (activeItems.length === 0) return currentStatus; // fired but empty — stays 'fired' (or wherever it was)
+  if (activeItems.every(i => i.status === 'served')) return 'served';
+  if (activeItems.every(i => i.status === 'ready' || i.status === 'served')) return 'ready';
+  if (activeItems.some(i => i.status === 'preparing' || i.status === 'ready' || i.status === 'served')) return 'preparing';
+  return currentStatus; // still just 'sent' items, nothing prepared yet — stays 'fired'
+}
+
+// course_names is stored as a JSON array (default '["Starters","Mains","Desserts"]'),
+// 1-indexed by course_number against a 0-indexed array. Falls back to a
+// generic label rather than throwing if the array is short or malformed —
+// firing course 4 on a venue that only named 3 courses is a config gap, not
+// a reason to fail the fire.
+export function courseNameFromSettings(courseNames: unknown, courseNumber: number): string {
+  if (Array.isArray(courseNames) && typeof courseNames[courseNumber - 1] === 'string') {
+    return courseNames[courseNumber - 1] as string;
+  }
+  return `Course ${courseNumber}`;
 }

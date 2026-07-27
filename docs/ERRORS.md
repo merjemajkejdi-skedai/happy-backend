@@ -126,6 +126,16 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `CANCEL_REASON_REQUIRED` | 422 | `POST /orders/:id/cancel` without a `reason`. |
 | `CANCEL_AFTER_SEND_NOT_ALLOWED` | 403 | A non-admin cancelling an order after anything has been sent (`first_sent_at` is set). |
 
+## Orders — course firing (`/orders/:id/courses/*`, `/orders/:id/items/:itemId/course`)
+
+| Code | Status | Fires when |
+|---|---|---|
+| `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` | 403 | Any course-firing route on a `happy_bar` venue, or on a venue with `send_by_course=false`. Venue type is checked first, so a `happy_bar` venue always gets the venue-type message even if `send_by_course` also happens to be false there. Phase 2, session 2c. |
+| `PREVIOUS_COURSE_NOT_SERVED` | 409 | `POST /orders/:id/courses/:n/fire` for `n > 1` while `course_fire_requires_previous_served=true` and course `n-1` doesn't have `all_served_at` set. A course with no items ever assigned is treated as vacuously served. Phase 2, session 2c. |
+| `COURSE_ALREADY_STARTED` | 409 | `POST /orders/:id/courses/:n/hold` when the course has an item already `preparing`/`ready`/`served` — hold only undoes a fire that kitchen/bar hasn't touched yet. Phase 2, session 2c. |
+
+`ITEM_ALREADY_SENT` is reused (not a new code) for `PATCH /orders/:id/items/:itemId/course` on a non-`pending` item — moving between courses is only allowed while pending, same meaning as the existing item-edit lock.
+
 ## Displays (`/displays/*`)
 
 | Code | Status | Fires when |

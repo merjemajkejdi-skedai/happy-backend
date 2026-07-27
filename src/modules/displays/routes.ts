@@ -19,13 +19,27 @@ function parseDisplayQuery(req: Request) {
 displaysRouter.get('/kitchen', requireDisplayScope('kitchen'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'kitchen', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, { tickets: result.value.tickets }, result.value.meta as unknown as Record<string, unknown>);
+  sendData(res, { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts }, result.value.meta as unknown as Record<string, unknown>);
 });
 
 displaysRouter.get('/bar', requireDisplayScope('bar'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'bar', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, { tickets: result.value.tickets }, result.value.meta as unknown as Record<string, unknown>);
+  sendData(res, { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts }, result.value.meta as unknown as Record<string, unknown>);
+});
+
+// Standalone alert feed — gated by the same "send_by_course AND venue type"
+// availability rule as the course-firing routes in orders/coursesRoutes.ts.
+displaysRouter.get('/kitchen/fire-alerts', requirePermission('display.view'), async (req: Request, res: Response) => {
+  const result = await displaysService.getFireAlerts(req.auth!.venueId);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, result.value);
+});
+
+displaysRouter.post('/fire-alerts/:id/ack', requirePermission('display.bump'), async (req: Request, res: Response) => {
+  const result = await displaysService.ackFireAlert(req.auth!.venueId, req.params.id);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, { acknowledged: true });
 });
 
 displaysRouter.get('/recall', requirePermission('display.bump'), async (req: Request, res: Response) => {

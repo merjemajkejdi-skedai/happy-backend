@@ -1,4 +1,5 @@
-import type { Order, OrderItem, OrderItemModifier } from '../../generated/prisma/client';
+import type { Order, OrderCourse, OrderItem, OrderItemModifier, RestaurantTable, TableNaming } from '../../generated/prisma/client';
+import { computeDisplayLabel } from '../tables/service';
 
 // Response shape is locked per spec (snake_case, unlike the rest of this
 // API's camelCase Prisma-passthrough responses) — Phase 2 swaps polling for
@@ -117,4 +118,51 @@ export function buildTicket(
 export function buildMeta(refreshSeconds: number, tickets: DisplayTicketDTO[], now: Date): DisplayMetaDTO {
   const itemCount = tickets.reduce((sum, t) => sum + t.courses.reduce((s, c) => s + c.items.length, 0), 0);
   return { generated_at: now.toISOString(), refresh_seconds: refreshSeconds, ticket_count: tickets.length, item_count: itemCount };
+}
+
+// Phase 2, session 2c. The backend composes headline/table_label — the
+// client never builds them.
+export interface FireAlertDTO {
+  id: string;
+  type: 'fire';
+  course_number: number;
+  course_name: string;
+  order_number: number;
+  table_label: string | null;
+  item_count: number;
+  fired_at: string;
+  expires_at: string;
+  headline: string;
+  acknowledged: boolean;
+}
+
+export function buildFireAlert(
+  course: OrderCourse,
+  order: Order,
+  table: RestaurantTable | null,
+  tableNamingMode: TableNaming,
+  showFireAlertSeconds: number,
+): FireAlertDTO {
+  const firedAt = course.firedAt!; // callers only pass already-fired courses
+  const expiresAt = new Date(firedAt.getTime() + showFireAlertSeconds * 1000);
+
+  const isCounter = order.serviceMode === 'counter';
+  const tableLabel = !isCounter && table ? `Table ${computeDisplayLabel(tableNamingMode, table.tableNumber, table.tableName)}` : null;
+  const locationForHeadline = isCounter
+    ? `TICKET ${order.ticketNumber}`
+    : `TABLE ${(table ? computeDisplayLabel(tableNamingMode, table.tableNumber, table.tableName) : '').toUpperCase()}`;
+
+  return {
+    id: course.id,
+    type: 'fire',
+    course_number: course.courseNumber,
+    course_name: course.courseNameSnapshot,
+    order_number: order.orderNumber,
+    table_label: tableLabel,
+    item_count: course.itemCount,
+    fired_at: firedAt.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    headline: `FIRE ${course.courseNameSnapshot.toUpperCase()} — ${locationForHeadline}`,
+    acknowledged: course.fireAlertAckedAt != null,
+  };
 }

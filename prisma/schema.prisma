@@ -826,6 +826,9 @@ model OrderCourse {
   firstReadyAt       DateTime?    @map("first_ready_at") @db.Timestamptz
   allServedAt        DateTime?    @map("all_served_at") @db.Timestamptz
   itemCount          Int          @default(0) @map("item_count") @db.SmallInt
+  // Phase 2, session 2c — fire alerts derive from fired_at/this column rather
+  // than a separate table (see docs/phase2/SESSION-2c.md).
+  fireAlertAckedAt   DateTime?    @map("fire_alert_acked_at") @db.Timestamptz
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

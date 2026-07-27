@@ -3,7 +3,7 @@ import { prisma } from '../../db/prisma';
 import { computeDisplayLabel } from '../tables/service';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { allocateNumbers, formatTicketNumber } from './ticketNumbering';
-import { deriveOrderStatus, type ExplicitOrderFlag } from './statusMachine';
+import { deriveOrderStatus, deriveCourseStatus, courseNameFromSettings, type ExplicitOrderFlag } from './statusMachine';
 import {
   Prisma,
   type Order,
@@ -11,6 +11,7 @@ import {
   type OrderItem,
   type OrderItemModifier,
   type OrderStatus,
+  type RestaurantSettings,
   type ServiceMode,
 } from '../../generated/prisma/client';
 
@@ -63,10 +64,67 @@ export async function recomputeOrder(
 
   const status = deriveOrderStatus(items, options?.explicitFlag);
 
-  return tx.order.update({
+  const updated = await tx.order.update({
     where: { id: orderId },
     data: { subtotal, taxTotal, serviceChargeTotal, discountTotal, grandTotal, status, ...options?.extraData },
   });
+
+  await recomputeCourses(tx, venueId, orderId, items, settings);
+
+  return updated;
+}
+
+// Phase 2, session 2c. Runs on every recomputeOrder call (i.e. after every
+// item status change), so course state never needs a separate update path.
+// Lazily creates an order_courses row the first time an item carries a given
+// course_number — "assigned to a course" here means item.courseNumber (the
+// waiter's fire target), never courseNumberSnapshot (the menu-time default,
+// which item.courseNumber is seeded from at add-time but which can later
+// diverge via PATCH .../items/:itemId/course).
+async function recomputeCourses(
+  tx: Tx,
+  venueId: string,
+  orderId: string,
+  items: OrderItem[],
+  settings: RestaurantSettings,
+): Promise<void> {
+  const activeItems = items.filter(i => i.status !== 'cancelled');
+  const courseNumbers = new Set<number>();
+  for (const i of activeItems) if (i.courseNumber != null) courseNumbers.add(i.courseNumber);
+
+  const existingCourses = await tx.orderCourse.findMany({ where: { orderId, venueId } });
+  for (const c of existingCourses) courseNumbers.add(c.courseNumber);
+  if (courseNumbers.size === 0) return;
+
+  const now = new Date();
+  for (const courseNumber of courseNumbers) {
+    const courseItems = activeItems.filter(i => i.courseNumber === courseNumber);
+    const existing = existingCourses.find(c => c.courseNumber === courseNumber);
+
+    if (!existing) {
+      if (courseItems.length === 0) continue;
+      await tx.orderCourse.create({
+        data: {
+          venueId,
+          orderId,
+          courseNumber,
+          courseNameSnapshot: courseNameFromSettings(settings.courseNames, courseNumber),
+          itemCount: courseItems.length,
+        },
+      });
+      continue;
+    }
+
+    const status = deriveCourseStatus(existing.status, courseItems);
+    const firstReadyAt = existing.firstReadyAt ?? (courseItems.some(i => i.status === 'ready' || i.status === 'served') ? now : null);
+    const allServedAt =
+      existing.allServedAt ?? (courseItems.length > 0 && courseItems.every(i => i.status === 'served') ? now : null);
+
+    await tx.orderCourse.update({
+      where: { id: existing.id },
+      data: { itemCount: courseItems.length, status, firstReadyAt, allServedAt },
+    });
+  }
 }
 
 // ── Create ───────────────────────────────────────────────────────────────────

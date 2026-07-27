@@ -41,6 +41,18 @@ INDEX (venue_id, status, fired_at)
 `course_name_snapshot` is copied from `settings.course_names` at row creation.
 Renaming courses later must not rewrite history.
 
+**Session 2c addendum:** one column added, additive migration
+`20260727092018_course_fire_alert_ack`:
+
+| column | type | constraints |
+|---|---|---|
+| fire_alert_acked_at | timestamptz | NULL |
+
+Fire alerts (`GET /displays/kitchen/fire-alerts`) derive from `fired_at`/this
+column rather than a separate table — an alert is "a course fired within the
+last `show_fire_alert_seconds` and `fire_alert_acked_at IS NULL`". See
+`docs/phase2/SESSION-2c.md`.
+
 ---
 
 ## 2. `restaurant_void_log`

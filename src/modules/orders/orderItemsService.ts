@@ -203,6 +203,10 @@ export async function addItem(
         unitPriceSnapshot,
         destinationSnapshot: menuItem.destination,
         courseNumberSnapshot,
+        // Phase 2, session 2c: courseNumber is the live fire target, seeded
+        // from the snapshot at creation but independently movable later via
+        // PATCH .../items/:itemId/course — never merge the two back together.
+        courseNumber: courseNumberSnapshot,
         taxRateSnapshot,
         quantity,
         modifiersTotal,

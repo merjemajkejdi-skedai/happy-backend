@@ -133,6 +133,29 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | POST | `/orders/{id}/cancel` | `order.create` (+ `order.cancel_sent` once anything sent) | Cancel an order and all its items. A waiter may only before the first send; admin-only after. `reason` mandatory. | — |
 | GET | `/orders/{id}/events` | `order.events.read` (admin) | Paginated audit trail, newest first, actor names resolved. | — |
 
+## Orders — course firing (Phase 2, session 2c)
+
+Every route below requires `send_by_course=true` AND `venue_type` in (`happy_restaurant`, `happy_hybrid`) — 403 `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` otherwise (venue type checked first).
+
+| Method | Path | Permission | Description | Gating flag(s) |
+|---|---|---|---|---|
+| GET | `/orders/{id}/courses` | `order.create` | Course state (status, fired_at, item_count, first_ready_at, all_served_at) for every course that's had an item assigned. | `send_by_course` |
+| POST | `/orders/{id}/courses/{n}/fire` | `order.fire` | Send that course's pending items (reuses the same send logic as `POST /orders/:id/send`, including `destination:'none'` skipping straight to `served`). No-op success on an empty or already-fired course. | `send_by_course`, `course_fire_requires_previous_served` |
+| POST | `/orders/{id}/courses/{n}/hold` | `order.fire` | Un-fires a course — reverts its `sent` items back to `pending` — only while nothing in it has reached `preparing`/`ready`/`served`. 409 `COURSE_ALREADY_STARTED` otherwise. No-op success if the course was never fired. | `send_by_course` |
+| POST | `/orders/{id}/courses/reorder` | `order.fire` | `{course_numbers: number[]}` — a full permutation of this order's existing course numbers; array position becomes the new course number. **Best-effort implementation — spec gave no payload example for this route; see `docs/phase2/SESSION-2c.md`.** | `send_by_course` |
+| PATCH | `/orders/{id}/items/{itemId}/course` | `order.create` | Move an item to a different course — only while `pending` (409 `ITEM_ALREADY_SENT` otherwise). | `send_by_course`, `courses_enabled` |
+
+`POST /orders/:id/send` (existing Phase 1 route) also gains one behavior: when `auto_fire_first_course=true` and this is the order's very first send, it fires course 1 rather than sending every pending item across every course.
+
+## Displays — fire alerts (Phase 2, session 2c)
+
+Same "backend composes the headline" rule as the rest of the displays module — see the response shape in `docs/phase2/SESSION-2c.md`. `GET /displays/kitchen` and `GET /displays/bar` additively gain a `fire_alerts` array (always present, empty when nothing applies — no availability gate on those two pre-existing routes). The two routes below are new and standalone, and DO carry the course-firing availability gate.
+
+| Method | Path | Permission | Description | Gating flag(s) |
+|---|---|---|---|---|
+| GET | `/displays/kitchen/fire-alerts` | `display.view` | Alerts fired within the last `show_fire_alert_seconds` and not yet acknowledged. | `send_by_course`, `show_fire_alert_seconds` |
+| POST | `/displays/fire-alerts/{id}/ack` | `display.bump` | Acknowledge (dismiss) an alert. `{id}` is the underlying `order_courses.id`. | — |
+
 ## Displays
 
 Phase 1 is polling-only — no WebSockets/SSE. Response shape is locked (snake_case, unlike the rest of this API) so a future push-transport swap needs zero client changes.

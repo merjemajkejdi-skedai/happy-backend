@@ -103,6 +103,11 @@ export const ERROR_CODES = [
   'CANCEL_REASON_REQUIRED',
   'CANCEL_AFTER_SEND_NOT_ALLOWED',
 
+  // ── Orders — course firing (Phase 2, session 2c) ─────────────────────────
+  'COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE',
+  'PREVIOUS_COURSE_NOT_SERVED',
+  'COURSE_ALREADY_STARTED',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',
