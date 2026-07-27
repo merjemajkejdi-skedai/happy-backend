@@ -6,7 +6,7 @@ import * as categoriesService from './categoriesService';
 
 export const categoriesRouter = Router();
 
-categoriesRouter.get('/', async (req: Request, res: Response) => {
+categoriesRouter.get('/', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const { is_active } = req.query as Record<string, string>;
   const { page, perPage } = parsePagination(req.query);
   const result = await categoriesService.listCategories(req.auth!.venueId, {

@@ -13,7 +13,7 @@ import {
   type OrderStatus,
   type UserRole,
 } from '../../generated/prisma/client';
-import { roleHasPermission } from '../../shared/permissions';
+import { canVoidAfterSend } from '../../shared/permissions';
 
 export type OrderItemResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
 
@@ -314,7 +314,7 @@ export async function voidItem(
   const { settings } = await getVenueAndSettings(venueId);
 
   if (item.status !== 'pending') {
-    if (!settings.allowItemVoidAfterSend || !roleHasPermission(actorRole, 'order.void_after_send')) {
+    if (!settings.allowItemVoidAfterSend || !canVoidAfterSend(actorRole, settings)) {
       return { ok: false, error: err(403, 'VOID_AFTER_SEND_NOT_ALLOWED', 'Voiding an item after it has been sent is not allowed') };
     }
   }

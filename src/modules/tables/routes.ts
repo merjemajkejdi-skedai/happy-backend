@@ -22,7 +22,7 @@ function respond<T>(res: Response, result: TableResult<T>) {
   sendData(res, result.value);
 }
 
-tablesRouter.get('/', async (req: Request, res: Response) => {
+tablesRouter.get('/', requirePermission('table.view'), async (req: Request, res: Response) => {
   const { area_id, status } = req.query as Record<string, string>;
   if (status && !TABLE_STATUSES.includes(status as TableStatus)) {
     return sendError(res, 'VALIDATION_ERROR', `status must be one of: ${TABLE_STATUSES.join(', ')}`);
@@ -60,7 +60,7 @@ tablesRouter.post('/bulk', requirePermission('table.write'), async (req: Request
   respond(res, result);
 });
 
-tablesRouter.get('/:id', async (req: Request, res: Response) => {
+tablesRouter.get('/:id', requirePermission('table.view'), async (req: Request, res: Response) => {
   const table = await tablesService.getTable(req.auth!.venueId, req.params.id);
   if (!table) return sendError(res, 'NOT_FOUND', 'Table not found');
   sendData(res, table);

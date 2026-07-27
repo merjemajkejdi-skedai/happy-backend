@@ -49,13 +49,15 @@ credentials — the same code either way, so a client can't distinguish
 
 | Code | Status | Fires when |
 |---|---|---|
-| `ROLE_NOT_AVAILABLE_IN_PHASE_1` | 422 | `role` is anything other than `waiter`/`kitchen`/`admin` (`manager`/`bar` are schema-only in Phase 1). |
 | `CREDENTIALS_REQUIRED` | 422 | Neither email+password nor a PIN provided (create), or an update would leave the user with no login method at all. |
 | `EMAIL_ALREADY_IN_USE` | 409 | That email is already used by another active user at this venue. |
 | `PIN_ALREADY_IN_USE` | 409 | That PIN is already used by another active user at this venue. |
 | `DUPLICATE_CREDENTIAL` | 409 | Race-condition backstop for the two codes above (the unique-constraint violation didn't specify which field). |
 | `CANNOT_MODIFY_SELF` | 422 | An admin tried to deactivate or delete their own account. |
 | `EMAIL_REQUIRED_FOR_PASSWORD` | 422 | `POST /users/:id/reset-password` on a user with no email on file. |
+| `INSUFFICIENT_ROLE_AUTHORITY` | 403 | A manager tried to create/edit a user whose current or target role is `manager` or `admin` — managers may only manage `waiter`/`kitchen`/`bar`. Session 2a-ii. |
+
+Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`bar`) — `ROLE_NOT_AVAILABLE_IN_PHASE_1` no longer exists; any string that isn't a real `UserRole` value now fails generic `VALIDATION_ERROR` instead.
 
 ## Areas (`/areas/*`)
 

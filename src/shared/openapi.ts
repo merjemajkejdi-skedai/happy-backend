@@ -97,7 +97,6 @@ const schemas: Record<string, object> = {
       ticketNumberReset: { type: 'string', enum: ['daily', 'never'] },
       requireTableForOrder: { type: 'boolean' },
       allowTableTransfer: { type: 'boolean' },
-      allowOrderMerge: { type: 'boolean' },
       coursesEnabled: { type: 'boolean' },
       defaultCourseCount: { type: 'integer' },
       modifiersEnabled: { type: 'boolean' },
@@ -108,7 +107,6 @@ const schemas: Record<string, object> = {
       displayShowElapsedTime: { type: 'boolean' },
       displayWarnAfterMinutes: { type: 'integer' },
       allowItemVoidAfterSend: { type: 'boolean' },
-      requireReasonOnVoid: { type: 'boolean' },
       autoSendOnAdd: { type: 'boolean' },
       whatsappEnabled: { type: 'boolean' },
       whatsappConfig: { description: 'Present only when whatsapp_enabled is true.' },
@@ -574,19 +572,24 @@ const paths: Record<string, Record<string, object>> = {
       parameters: [...paginationParams, queryParam('role'), queryParam('is_active', { type: 'boolean' })],
       responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/User' } }, paginationMeta)) },
     }),
-    post: op('Create a staff account (requires user.manage)', ['Users'], {
+    post: op('Create a staff account (requires user.manage; managers may only create waiter/kitchen/bar — see INSUFFICIENT_ROLE_AUTHORITY)', ['Users'], {
       requestBody: {
         type: 'object',
         required: ['full_name', 'role'],
         properties: {
           full_name: { type: 'string' },
-          role: { type: 'string', enum: ['waiter', 'kitchen', 'admin'] },
+          role: { type: 'string', enum: ['waiter', 'kitchen', 'admin', 'manager', 'bar'] },
           email: { type: 'string' },
           password: { type: 'string' },
           pin: { type: 'string' },
         },
       },
       responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
+    }),
+  },
+  '/users/roles': {
+    get: op('Roles the current user is allowed to assign (requires user.manage) — all five for admin, waiter/kitchen/bar for manager', ['Users'], {
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { roles: { type: 'array', items: { type: 'string' } } } })) },
     }),
   },
   '/users/{id}': {
@@ -601,6 +604,13 @@ const paths: Record<string, Record<string, object>> = {
     delete: op('Soft-delete a staff account (requires user.manage)', ['Users'], {
       parameters: [pathParam('id', 'User id')],
       responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
+  },
+  '/users/{id}/role': {
+    patch: op('Change a staff account\'s role (requires user.manage, subject to the same manager restriction as PATCH /users/{id})', ['Users'], {
+      parameters: [pathParam('id', 'User id')],
+      requestBody: { type: 'object', required: ['role'], properties: { role: { type: 'string', enum: ['waiter', 'kitchen', 'admin', 'manager', 'bar'] } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/User' })) },
     }),
   },
   '/users/{id}/reset-pin': {
@@ -941,6 +951,22 @@ const paths: Record<string, Record<string, object>> = {
     post: op('Un-bump a mistake: ready -> preparing, clears ready_at (requires display.bump)', ['Displays'], {
       parameters: [pathParam('itemId', 'Order item id')],
       responses: { '200': response('OK', envelope({ type: 'object', properties: { recalled: { type: 'boolean' } } })) },
+    }),
+  },
+
+  // ── Permissions (Phase 2, session 2a-ii) ────────────────────────────────
+  '/permissions': {
+    get: op('Resolved permission matrix + display scope for the current user\'s role and venue — reflects settings-dependent resolution, not the static ceiling. What the frontend gates on.', ['Permissions'], {
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            role: { type: 'string', enum: ['waiter', 'kitchen', 'admin', 'manager', 'bar'] },
+            permissions: { type: 'array', items: { type: 'string' } },
+            display_scope: { type: 'object', properties: { kitchen: { type: 'boolean' }, bar: { type: 'boolean' } } },
+          },
+        })),
+      },
     }),
   },
 

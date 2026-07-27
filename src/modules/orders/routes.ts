@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
 import { requirePermission } from '../../middleware/rbac';
+import { roleHasPermission } from '../../shared/permissions';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import { runIdempotent } from '../../lib/idempotency';
@@ -19,6 +20,13 @@ const ORDER_STATUSES: OrderStatus[] = ['draft', 'open', 'sent', 'partially_serve
 const SERVICE_MODES: ServiceMode[] = ['table', 'counter'];
 
 ordersRouter.get('/', async (req: Request, res: Response) => {
+  const role = req.auth!.role;
+  const hasViewAll = roleHasPermission(role, 'order.view_all');
+  const hasViewOwn = roleHasPermission(role, 'order.view_own');
+  if (!hasViewAll && !hasViewOwn) {
+    return sendError(res, 'FORBIDDEN', 'Missing permission: order.view_own');
+  }
+
   const { status, table_id, service_mode, mine, date } = req.query as Record<string, string>;
   if (status && !ORDER_STATUSES.includes(status as OrderStatus)) {
     return sendError(res, 'VALIDATION_ERROR', `status must be one of: ${ORDER_STATUSES.join(', ')}`);
@@ -27,13 +35,17 @@ ordersRouter.get('/', async (req: Request, res: Response) => {
     return sendError(res, 'VALIDATION_ERROR', `service_mode must be one of: ${SERVICE_MODES.join(', ')}`);
   }
 
+  // An actor with only order.view_own (not order.view_all) is restricted to
+  // their own orders regardless of what they asked for via ?mine=.
+  const mine_ = hasViewAll ? mine === 'true' : true;
+
   const { page, perPage } = parsePagination(req.query);
   const [result, settings] = await Promise.all([
     ordersService.listOrders(req.auth!.venueId, req.auth!.userId, {
       status: status as OrderStatus | undefined,
       tableId: table_id,
       serviceMode: service_mode as ServiceMode | undefined,
-      mine: mine === 'true',
+      mine: mine_,
       date,
       page,
       perPage,
@@ -66,11 +78,21 @@ ordersRouter.post('/', requirePermission('order.create'), async (req: Request, r
 });
 
 ordersRouter.get('/:id', async (req: Request, res: Response) => {
+  const role = req.auth!.role;
+  const hasViewAll = roleHasPermission(role, 'order.view_all');
+  const hasViewOwn = roleHasPermission(role, 'order.view_own');
+  if (!hasViewAll && !hasViewOwn) {
+    return sendError(res, 'FORBIDDEN', 'Missing permission: order.view_own');
+  }
+
   const [order, settings] = await Promise.all([
     ordersService.getOrder(req.auth!.venueId, req.params.id),
     getSettingsRow(req.auth!.venueId),
   ]);
   if (!order) return sendError(res, 'NOT_FOUND', 'Order not found');
+  if (!hasViewAll && order.openedByUserId !== req.auth!.userId) {
+    return sendError(res, 'FORBIDDEN', 'Missing permission: order.view_all');
+  }
   sendData(res, serializeOrder(order, settings?.pmsEnabled));
 });
 

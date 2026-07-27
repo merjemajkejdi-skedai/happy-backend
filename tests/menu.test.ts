@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { Response } from 'express';
 import { prisma } from '../src/db/prisma';
-import { requirePermission } from '../src/middleware/rbac';
+import { requirePermission, requireResolvedPermission } from '../src/middleware/rbac';
 import * as categoriesService from '../src/modules/menu/categoriesService';
 import * as itemsService from '../src/modules/menu/itemsService';
 import { getMenuTree } from '../src/modules/menu/treeService';
@@ -128,11 +128,18 @@ function mockRes() {
 }
 
 describe('86-toggle vs menu-write permission separation', () => {
-  it.each(['waiter', 'kitchen'] as const)('%s is permitted to toggle availability (menu.availability)', role => {
-    const req = { auth: { userId: 'u1', venueId: 'v1', role } } as any;
+  // menu.eightysix became settings-dependent in session 2a-ii (resolved via
+  // eightysix_requires_manager, requireResolvedPermission — not the flat
+  // requirePermission any more), so this needs a real seeded venue rather
+  // than a synthetic venueId. None of the seeded venues set
+  // eightysix_requires_manager (schema default false), so waiter/kitchen/bar
+  // all have it here.
+  it.each(['waiter', 'kitchen', 'bar'] as const)('%s is permitted to toggle availability (menu.eightysix)', async role => {
+    const venue = await venueByslug('happy-hybrid');
+    const req = { auth: { userId: 'u1', venueId: venue.id, role } } as any;
     const res = mockRes();
     const next = vi.fn();
-    requirePermission('menu.availability')(req, res, next);
+    await requireResolvedPermission('menu.eightysix')(req, res, next);
     expect(next).toHaveBeenCalledOnce();
     expect(res.status).not.toHaveBeenCalled();
   });
@@ -149,14 +156,19 @@ describe('86-toggle vs menu-write permission separation', () => {
     );
   });
 
-  it('admin is permitted both menu.availability and menu.write', () => {
-    for (const permission of ['menu.availability', 'menu.write'] as const) {
-      const req = { auth: { userId: 'u1', venueId: 'v1', role: 'admin' } } as any;
-      const res = mockRes();
-      const next = vi.fn();
-      requirePermission(permission)(req, res, next);
-      expect(next).toHaveBeenCalledOnce();
-    }
+  it('admin is permitted both menu.eightysix and menu.write', async () => {
+    const venue = await venueByslug('happy-hybrid');
+    const reqFor = (venueId: string) => ({ auth: { userId: 'u1', venueId, role: 'admin' } }) as any;
+
+    const res1 = mockRes();
+    const next1 = vi.fn();
+    await requireResolvedPermission('menu.eightysix')(reqFor(venue.id), res1, next1);
+    expect(next1).toHaveBeenCalledOnce();
+
+    const res2 = mockRes();
+    const next2 = vi.fn();
+    requirePermission('menu.write')(reqFor('v1'), res2, next2);
+    expect(next2).toHaveBeenCalledOnce();
   });
 });
 

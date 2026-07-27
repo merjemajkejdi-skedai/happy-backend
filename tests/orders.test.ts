@@ -326,8 +326,11 @@ describe('Void rules with the flag on and off', () => {
     });
   });
 
-  it('allows an admin (with the flag on) to void a sent item, but denies a waiter the same action', async () => {
-    await prisma.restaurantSettings.update({ where: { venueId: fx.venueId }, data: { allowItemVoidAfterSend: true } });
+  it('allows an admin (with the flag on) to void a sent item regardless of void_requires_approval', async () => {
+    await prisma.restaurantSettings.update({
+      where: { venueId: fx.venueId },
+      data: { allowItemVoidAfterSend: true, voidRequiresApproval: true },
+    });
 
     const orderResult = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' });
     if (!orderResult.ok) throw new Error('setup failed');
@@ -338,18 +341,50 @@ describe('Void rules with the flag on and off', () => {
     if (!addResult.ok) throw new Error('setup failed');
     await prisma.orderItem.update({ where: { id: addResult.value.id }, data: { status: 'sent' } });
 
-    const waiterAttempt = await orderItemsService.voidItem(
-      fx.venueId, fx.adminUserId, 'waiter', orderResult.value.id, addResult.value.id, { reason: 'kitchen error' },
-    );
-    expect(waiterAttempt).toEqual({
-      ok: false,
-      error: { status: 403, code: 'VOID_AFTER_SEND_NOT_ALLOWED', message: 'Voiding an item after it has been sent is not allowed' },
-    });
-
     const adminAttempt = await orderItemsService.voidItem(
       fx.venueId, fx.adminUserId, 'admin', orderResult.value.id, addResult.value.id, { reason: 'kitchen error' },
     );
     expect(adminAttempt.ok).toBe(true);
+
+    await prisma.restaurantSettings.update({
+      where: { venueId: fx.venueId },
+      data: { allowItemVoidAfterSend: false, voidRequiresApproval: false },
+    });
+  });
+
+  // Session 2a-ii, docs/phase2/2a-ii.md section 4: order.void_after_send for
+  // waiter/bar is conditional on void_requires_approval, not a flat N as it
+  // was in Phase 1 (where only admin could ever reach this branch) — see
+  // canVoidAfterSend in shared/permissions.ts.
+  it('waiter void-after-send follows void_requires_approval: denied when true, permitted when false', async () => {
+    await prisma.restaurantSettings.update({
+      where: { venueId: fx.venueId },
+      data: { allowItemVoidAfterSend: true, voidRequiresApproval: true },
+    });
+
+    const orderResult = await ordersService.createOrder(fx.venueId, fx.adminUserId, { serviceMode: 'counter' });
+    if (!orderResult.ok) throw new Error('setup failed');
+    const addResult = await orderItemsService.addItem(fx.venueId, fx.adminUserId, orderResult.value.id, {
+      menuItemId: fx.itemId,
+      modifierOptionIds: [fx.cheeseOptionId],
+    });
+    if (!addResult.ok) throw new Error('setup failed');
+    await prisma.orderItem.update({ where: { id: addResult.value.id }, data: { status: 'sent' } });
+
+    const deniedAttempt = await orderItemsService.voidItem(
+      fx.venueId, fx.adminUserId, 'waiter', orderResult.value.id, addResult.value.id, { reason: 'kitchen error' },
+    );
+    expect(deniedAttempt).toEqual({
+      ok: false,
+      error: { status: 403, code: 'VOID_AFTER_SEND_NOT_ALLOWED', message: 'Voiding an item after it has been sent is not allowed' },
+    });
+
+    await prisma.restaurantSettings.update({ where: { venueId: fx.venueId }, data: { voidRequiresApproval: false } });
+
+    const permittedAttempt = await orderItemsService.voidItem(
+      fx.venueId, fx.adminUserId, 'waiter', orderResult.value.id, addResult.value.id, { reason: 'kitchen error' },
+    );
+    expect(permittedAttempt.ok).toBe(true);
 
     await prisma.restaurantSettings.update({ where: { venueId: fx.venueId }, data: { allowItemVoidAfterSend: false } });
   });

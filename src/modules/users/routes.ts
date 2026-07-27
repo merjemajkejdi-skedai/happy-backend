@@ -32,11 +32,15 @@ usersRouter.get('/', async (req: Request, res: Response) => {
   sendData(res, result.users.map(serializeUser), buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
+usersRouter.get('/roles', async (req: Request, res: Response) => {
+  sendData(res, { roles: usersService.assignableRoles(req.auth!.role) });
+});
+
 usersRouter.post('/', async (req: Request, res: Response) => {
   const { full_name, role, email, password, pin } = req.body ?? {};
   if (!full_name?.trim() || !role) return sendError(res, 'VALIDATION_ERROR', 'full_name and role are required');
 
-  const result = await usersService.createUser(req.auth!.venueId, {
+  const result = await usersService.createUser(req.auth!.venueId, req.auth!.role, {
     fullName: String(full_name).trim(),
     role: String(role),
     email: email ? String(email).trim() : null,
@@ -54,11 +58,23 @@ usersRouter.get('/:id', async (req: Request, res: Response) => {
 
 usersRouter.patch('/:id', async (req: Request, res: Response) => {
   const { full_name, role, is_active, email } = req.body ?? {};
-  const result = await usersService.updateUser(req.auth!.venueId, req.auth!.userId, req.params.id, {
+  const result = await usersService.updateUser(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, {
     fullName: full_name !== undefined ? String(full_name).trim() : undefined,
     role: role !== undefined ? String(role) : undefined,
     isActive: is_active !== undefined ? Boolean(is_active) : undefined,
     email: email !== undefined ? (email ? String(email).trim() : null) : undefined,
+  });
+  respond(res, result, serializeUser);
+});
+
+// Dedicated role-change endpoint (docs/phase2/2a-ii.md section 6) — same
+// underlying updateUser() and the same rule-5 authority check, just a
+// narrower body than the general PATCH /:id above.
+usersRouter.patch('/:id/role', async (req: Request, res: Response) => {
+  const { role } = req.body ?? {};
+  if (!role) return sendError(res, 'VALIDATION_ERROR', 'role is required');
+  const result = await usersService.updateUser(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, {
+    role: String(role),
   });
   respond(res, result, serializeUser);
 });

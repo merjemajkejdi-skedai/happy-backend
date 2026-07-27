@@ -71,7 +71,7 @@ describe('PIN collision', () => {
 
   it('rejects creating a second user with a PIN already used at the same venue', async () => {
     const venue = await prisma.venue.findUnique({ where: { slug: TEST_VENUE_SLUG } });
-    const result = await usersService.createUser(venue!.id, { fullName: 'Second Waiter', role: 'waiter', pin: '1234' });
+    const result = await usersService.createUser(venue!.id, 'admin', { fullName: 'Second Waiter', role: 'waiter', pin: '1234' });
     expect(result).toEqual({
       ok: false,
       error: { status: 409, code: 'PIN_ALREADY_IN_USE', message: 'That PIN is already in use at this venue' },
@@ -82,14 +82,14 @@ describe('PIN collision', () => {
     const otherVenue = await venueByslug('happy-hybrid');
     // happy-hybrid's waiter already has PIN 1111, not 1234, so this is a
     // fresh PIN there even though it collides with the fixture venue's PIN.
-    const result = await usersService.createUser(otherVenue.id, { fullName: 'Cross-venue Probe', role: 'waiter', pin: '1234' });
+    const result = await usersService.createUser(otherVenue.id, 'admin', { fullName: 'Cross-venue Probe', role: 'waiter', pin: '1234' });
     expect(result.ok).toBe(true);
     if (result.ok) await usersService.softDeleteUser(otherVenue.id, '00000000-0000-0000-0000-000000000000', result.value.id);
   });
 
   it('rejects resetting a PIN to one already used by another user at the venue', async () => {
     const venue = await prisma.venue.findUnique({ where: { slug: TEST_VENUE_SLUG } });
-    const second = await usersService.createUser(venue!.id, { fullName: 'Kitchen Probe', role: 'kitchen', pin: '5678' });
+    const second = await usersService.createUser(venue!.id, 'admin', { fullName: 'Kitchen Probe', role: 'kitchen', pin: '5678' });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
 
@@ -175,34 +175,39 @@ describe('Table naming-mode validation — all three seeded venues', () => {
   });
 });
 
-describe('Manager/bar role rejection on user create', () => {
-  it('rejects role=manager with 422 ROLE_NOT_AVAILABLE_IN_PHASE_1', async () => {
+// Session 2a-ii: manager/bar are now real, assignable roles — the Phase 1
+// rejection tests this block used to contain are superseded. Full coverage
+// of role activation, the permission matrix, and the manager authority
+// restriction lives in tests/permissionMatrix.test.ts and
+// tests/roleActivation.test.ts.
+describe('Manager/bar roles are assignable (session 2a-ii)', () => {
+  it('admin can create a manager account', async () => {
     const venue = await venueByslug('happy-resto');
-    const result = await usersService.createUser(venue.id, { fullName: 'Future Manager', role: 'manager', pin: '4444' });
-    expect(result).toEqual({
-      ok: false,
-      error: { status: 422, code: 'ROLE_NOT_AVAILABLE_IN_PHASE_1', message: 'role must be one of: waiter, kitchen, admin' },
-    });
+    const admin = (await usersService.listUsers(venue.id, { role: 'admin' })).users[0];
+    const result = await usersService.createUser(venue.id, 'admin', { fullName: 'Test Manager Create', role: 'manager', pin: '4001' });
+    expect(result.ok).toBe(true);
+    if (result.ok) await usersService.softDeleteUser(venue.id, admin.id, result.value.id);
   });
 
-  it('rejects role=bar with 422 ROLE_NOT_AVAILABLE_IN_PHASE_1', async () => {
+  it('admin can create a bar account', async () => {
     const venue = await venueByslug('happy-bar');
-    const result = await usersService.createUser(venue.id, { fullName: 'Future Bar Staff', role: 'bar', pin: '4444' });
-    expect(result).toEqual({
-      ok: false,
-      error: { status: 422, code: 'ROLE_NOT_AVAILABLE_IN_PHASE_1', message: 'role must be one of: waiter, kitchen, admin' },
-    });
+    const admin = (await usersService.listUsers(venue.id, { role: 'admin' })).users[0];
+    const result = await usersService.createUser(venue.id, 'admin', { fullName: 'Test Bar Create', role: 'bar', pin: '4002' });
+    expect(result.ok).toBe(true);
+    if (result.ok) await usersService.softDeleteUser(venue.id, admin.id, result.value.id);
   });
 
-  it('rejects role=manager on PATCH too', async () => {
+  it('admin can promote a waiter to manager via PATCH', async () => {
     const venue = await venueByslug('happy-hybrid');
-    const admin = await usersService.listUsers(venue.id, { role: 'admin' });
-    const target = (await usersService.listUsers(venue.id, { role: 'waiter' })).users[0];
+    const admin = (await usersService.listUsers(venue.id, { role: 'admin' })).users[0];
+    const created = await usersService.createUser(venue.id, 'admin', { fullName: 'Test Promote Target', role: 'waiter', pin: '4003' });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
 
-    const result = await usersService.updateUser(venue.id, admin.users[0].id, target.id, { role: 'manager' });
-    expect(result).toEqual({
-      ok: false,
-      error: { status: 422, code: 'ROLE_NOT_AVAILABLE_IN_PHASE_1', message: 'role must be one of: waiter, kitchen, admin' },
-    });
+    const result = await usersService.updateUser(venue.id, admin.id, 'admin', created.value.id, { role: 'manager' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.role).toBe('manager');
+
+    await usersService.softDeleteUser(venue.id, admin.id, created.value.id);
   });
 });

@@ -36,15 +36,29 @@ Base path: `/api/v1`. Every route requires a Bearer access token (`authenticate`
 
 ## Users
 
+All five roles (`waiter`/`kitchen`/`admin`/`manager`/`bar`) are assignable as
+of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
+`bar` accounts — targeting (or promoting to) `manager`/`admin` returns 403
+`INSUFFICIENT_ROLE_AUTHORITY`, enforced in the service layer for both
+`POST /users` and both `PATCH` routes below.
+
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/users` | `user.manage` | List staff, filterable by `role`/`is_active`, paginated. |
-| POST | `/users` | `user.manage` | Create a staff account — `role` restricted to `waiter`/`kitchen`/`admin` in Phase 1. |
+| GET | `/users/roles` | `user.manage` | Roles the current actor may assign — all five for admin, `waiter`/`kitchen`/`bar` for manager. |
+| POST | `/users` | `user.manage` | Create a staff account. |
 | GET | `/users/{id}` | `user.manage` | Get a staff account. |
 | PATCH | `/users/{id}` | `user.manage` | Update a staff account. An admin can't deactivate their own account. |
+| PATCH | `/users/{id}/role` | `user.manage` | Change a user's role only — same underlying logic and manager restriction as the general `PATCH /users/{id}`. |
 | DELETE | `/users/{id}` | `user.manage` | Soft-delete. Releases the user's email/PIN for reuse by a future hire. An admin can't delete their own account. |
 | POST | `/users/{id}/reset-pin` | `user.manage` | Reset a user's PIN. |
 | POST | `/users/{id}/reset-password` | `user.manage` | Reset a user's password — requires the user to have an email on file. |
+
+## Permissions (Phase 2, session 2a-ii)
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/permissions` | (any authenticated role) | Resolved permission matrix + display scope for the current user's role and venue — settings-dependent resolution, not the static ceiling. What the frontend gates on. |
 
 ## Areas
 

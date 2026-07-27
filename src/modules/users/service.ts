@@ -4,7 +4,14 @@ import { pinLookup } from '../../shared/pin';
 import { Prisma, type User, type UserRole } from '../../generated/prisma/client';
 import { err, type DomainError } from '../../lib/domainError';
 
-const ALLOWED_ROLES: UserRole[] = ['waiter', 'kitchen', 'admin'];
+// All five roles are assignable as of session 2a-ii — the Phase 1
+// ALLOWED_ROLES restriction (and ROLE_NOT_AVAILABLE_IN_PHASE_1) is removed.
+const ALL_ROLES: UserRole[] = ['waiter', 'kitchen', 'admin', 'manager', 'bar'];
+// A manager may only create/edit accounts with these roles — enforced here
+// in the service layer (not just middleware), per docs/phase2/2a-ii.md
+// section 5, so it applies uniformly regardless of which route reaches
+// createUser/updateUser.
+const MANAGER_ASSIGNABLE_ROLES: UserRole[] = ['waiter', 'kitchen', 'bar'];
 const BCRYPT_COST = 10;
 
 export type UserDomainError = DomainError;
@@ -12,10 +19,25 @@ export type UserDomainError = DomainError;
 export type UserResult<T> = { ok: true; value: T } | { ok: false; error: UserDomainError };
 
 function validateRole(role: string): UserDomainError | null {
-  if (!ALLOWED_ROLES.includes(role as UserRole)) {
-    return err(422, 'ROLE_NOT_AVAILABLE_IN_PHASE_1', `role must be one of: ${ALLOWED_ROLES.join(', ')}`);
+  if (!ALL_ROLES.includes(role as UserRole)) {
+    return err(422, 'VALIDATION_ERROR', `role must be one of: ${ALL_ROLES.join(', ')}`);
   }
   return null;
+}
+
+// Rule 5: a manager may create/edit waiter, kitchen, or bar accounts only —
+// never another manager, and never an admin. Checked against whichever role
+// is actually in play (the target's current role, and/or the role being
+// assigned), independent of which of those is being validated at the time.
+export function checkManagerAuthority(actorRole: UserRole, targetRole: UserRole): UserDomainError | null {
+  if (actorRole === 'manager' && !MANAGER_ASSIGNABLE_ROLES.includes(targetRole)) {
+    return err(403, 'INSUFFICIENT_ROLE_AUTHORITY', 'Managers may only manage waiter, kitchen, or bar accounts');
+  }
+  return null;
+}
+
+export function assignableRoles(actorRole: UserRole): UserRole[] {
+  return actorRole === 'manager' ? MANAGER_ASSIGNABLE_ROLES : ALL_ROLES;
 }
 
 function validateCredentials(hasEmail: boolean, hasPassword: boolean, hasPin: boolean): UserDomainError | null {
@@ -65,9 +87,12 @@ export interface CreateUserInput {
   pin?: string;
 }
 
-export async function createUser(venueId: string, input: CreateUserInput): Promise<UserResult<User>> {
+export async function createUser(venueId: string, actorRole: UserRole, input: CreateUserInput): Promise<UserResult<User>> {
   const roleError = validateRole(input.role);
   if (roleError) return { ok: false, error: roleError };
+
+  const authorityError = checkManagerAuthority(actorRole, input.role as UserRole);
+  if (authorityError) return { ok: false, error: authorityError };
 
   const credError = validateCredentials(!!input.email, !!input.password, !!input.pin);
   if (credError) return { ok: false, error: credError };
@@ -115,15 +140,25 @@ export interface UpdateUserInput {
 export async function updateUser(
   venueId: string,
   actorUserId: string,
+  actorRole: UserRole,
   userId: string,
   input: UpdateUserInput,
 ): Promise<UserResult<User>> {
   const user = await scopedPrisma.user.findFirst({ where: { id: userId, venueId, deletedAt: null } });
   if (!user) return { ok: false, error: err(404, 'NOT_FOUND', 'User not found') };
 
+  // A manager can't touch an existing manager/admin account at all, and
+  // can't promote a target INTO manager/admin either — check both the
+  // subject's current role and (if changing) the role being assigned.
+  const currentRoleAuthorityError = checkManagerAuthority(actorRole, user.role);
+  if (currentRoleAuthorityError) return { ok: false, error: currentRoleAuthorityError };
+
   if (input.role !== undefined) {
     const roleError = validateRole(input.role);
     if (roleError) return { ok: false, error: roleError };
+
+    const newRoleAuthorityError = checkManagerAuthority(actorRole, input.role as UserRole);
+    if (newRoleAuthorityError) return { ok: false, error: newRoleAuthorityError };
   }
 
   if (input.isActive === false && userId === actorUserId) {

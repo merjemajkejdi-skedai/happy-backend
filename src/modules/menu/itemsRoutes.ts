@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { requirePermission } from '../../middleware/rbac';
+import { requirePermission, requireResolvedPermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as itemsService from './itemsService';
@@ -8,7 +8,7 @@ import { serializeMenuItem } from './serializers';
 
 export const itemsRouter = Router();
 
-itemsRouter.get('/', async (req: Request, res: Response) => {
+itemsRouter.get('/', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const { category_id, is_available, search } = req.query as Record<string, string>;
   const { page, perPage } = parsePagination(req.query);
   const result = await itemsService.listItems(req.auth!.venueId, {
@@ -50,7 +50,7 @@ itemsRouter.post('/', requirePermission('menu.write'), async (req: Request, res:
   sendData(res, serializeMenuItem(result.value));
 });
 
-itemsRouter.get('/:id', async (req: Request, res: Response) => {
+itemsRouter.get('/:id', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const item = await itemsService.getItem(req.auth!.venueId, req.params.id);
   if (!item) return sendError(res, 'NOT_FOUND', 'Item not found');
   sendData(res, serializeMenuItem(item));
@@ -86,7 +86,7 @@ itemsRouter.delete('/:id', requirePermission('menu.write'), async (req: Request,
   sendData(res, { deleted: true });
 });
 
-itemsRouter.patch('/:id/availability', requirePermission('menu.availability'), async (req: Request, res: Response) => {
+itemsRouter.patch('/:id/availability', requireResolvedPermission('menu.eightysix'), async (req: Request, res: Response) => {
   const { is_available } = req.body ?? {};
   if (typeof is_available !== 'boolean') return sendError(res, 'VALIDATION_ERROR', 'is_available (boolean) is required');
   const result = await itemsService.setItemAvailability(req.auth!.venueId, req.params.id, is_available);

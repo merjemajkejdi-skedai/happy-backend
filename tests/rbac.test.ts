@@ -1,15 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { roleHasPermission, ROLE_PERMISSIONS, type Permission } from '../src/shared/permissions';
+import { roleHasPermission } from '../src/shared/permissions';
 import { requirePermission } from '../src/middleware/rbac';
 import type { Response } from 'express';
 
-const ALL_PERMISSIONS: Permission[] = [
-  'order.create', 'order.send', 'order.transfer', 'order.serve', 'order.close',
-  'order.void_after_send', 'order.cancel_sent', 'display.bump', 'display.view',
-  'settings.write', 'user.manage', 'menu.write', 'table.write',
-  'table.status', 'menu.availability', 'order.events.read', 'venue.write',
-];
-
+// Exhaustive coverage of every permission x role cell (including the
+// session 2a-ii additions for manager/bar and the settings-dependent ones)
+// lives in tests/permissionMatrix.test.ts — this file keeps only the
+// original spot-checks plus the requirePermission middleware behavior
+// tests below.
 describe('permission registry', () => {
   it('waiter can create/send orders and change table status', () => {
     expect(roleHasPermission('waiter', 'order.create')).toBe(true);
@@ -17,29 +15,15 @@ describe('permission registry', () => {
     expect(roleHasPermission('waiter', 'table.status')).toBe(true);
   });
 
-  it('waiter cannot write settings, manage users, or void after send', () => {
+  it('waiter cannot write settings or manage users', () => {
     expect(roleHasPermission('waiter', 'settings.write')).toBe(false);
     expect(roleHasPermission('waiter', 'user.manage')).toBe(false);
-    expect(roleHasPermission('waiter', 'order.void_after_send')).toBe(false);
   });
 
   it('kitchen can bump the display but cannot create orders or write settings', () => {
     expect(roleHasPermission('kitchen', 'display.bump')).toBe(true);
     expect(roleHasPermission('kitchen', 'order.create')).toBe(false);
     expect(roleHasPermission('kitchen', 'settings.write')).toBe(false);
-  });
-
-  it('admin has every Phase 1 permission', () => {
-    for (const p of ALL_PERMISSIONS) expect(roleHasPermission('admin', p)).toBe(true);
-  });
-
-  it('manager and bar have no permissions in Phase 1 (defined, no routes yet)', () => {
-    for (const p of ALL_PERMISSIONS) {
-      expect(roleHasPermission('manager', p)).toBe(false);
-      expect(roleHasPermission('bar', p)).toBe(false);
-    }
-    expect(ROLE_PERMISSIONS.manager.size).toBe(0);
-    expect(ROLE_PERMISSIONS.bar.size).toBe(0);
   });
 });
 

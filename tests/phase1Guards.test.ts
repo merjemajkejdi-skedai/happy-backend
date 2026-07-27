@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { prisma } from '../src/db/prisma';
-import { ROLE_PERMISSIONS } from '../src/shared/permissions';
 import * as venueService from '../src/modules/venue/service';
 import { serializeVenue } from '../src/modules/venue/serializers';
 import * as settingsService from '../src/modules/settings/service';
@@ -17,12 +16,10 @@ async function venueByslug(slug: string) {
   return venue;
 }
 
-describe('No route or permission exists for manager or bar roles', () => {
-  it('manager and bar have zero permissions in Phase 1', () => {
-    expect(ROLE_PERMISSIONS.manager.size).toBe(0);
-    expect(ROLE_PERMISSIONS.bar.size).toBe(0);
-  });
-});
+// The "manager and bar have zero permissions" guard that lived here in
+// Phase 1 is superseded by session 2a-ii, which activates both roles —
+// see tests/permissionMatrix.test.ts and tests/roleActivation.test.ts for
+// full coverage of what they can now do.
 
 describe('whatsapp_config, ai_config, and pms_* fields are absent while their flags are false', () => {
   it('GET /venue omits pms_provider/pms_property_id/pms_config', async () => {

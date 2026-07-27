@@ -12,6 +12,7 @@ import { tablesRouter } from './modules/tables/routes';
 import { menuRouter } from './modules/menu/routes';
 import { ordersRouter } from './modules/orders/routes';
 import { displaysRouter } from './modules/displays/routes';
+import { permissionsRouter } from './modules/permissions/routes';
 import { openApiSpec } from './shared/openapi';
 import { requestLogger } from './middleware/requestLogger';
 import { sendError } from './lib/response';
@@ -33,6 +34,7 @@ app.use('/api/v1/tables', tablesRouter);
 app.use('/api/v1/menu', menuRouter);
 app.use('/api/v1/orders', ordersRouter);
 app.use('/api/v1/displays', displaysRouter);
+app.use('/api/v1/permissions', permissionsRouter);
 app.get('/api/v1/openapi.json', (_req, res) => res.json(openApiSpec));
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

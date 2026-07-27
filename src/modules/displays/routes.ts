@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
-import { requirePermission } from '../../middleware/rbac';
+import { requirePermission, requireDisplayScope } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
 import * as displaysService from './service';
 
@@ -16,13 +16,13 @@ function parseDisplayQuery(req: Request) {
   };
 }
 
-displaysRouter.get('/kitchen', requirePermission('display.view'), async (req: Request, res: Response) => {
+displaysRouter.get('/kitchen', requireDisplayScope('kitchen'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'kitchen', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
   sendData(res, { tickets: result.value.tickets }, result.value.meta as unknown as Record<string, unknown>);
 });
 
-displaysRouter.get('/bar', requirePermission('display.view'), async (req: Request, res: Response) => {
+displaysRouter.get('/bar', requireDisplayScope('bar'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'bar', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
   sendData(res, { tickets: result.value.tickets }, result.value.meta as unknown as Record<string, unknown>);

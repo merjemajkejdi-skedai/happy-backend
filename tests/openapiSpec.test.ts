@@ -24,7 +24,9 @@ describe('openApiSpec — 200 response shapes', () => {
   }
 
   it('found the expected number of operations with a 200 response', () => {
-    expect(operations.length).toBe(69);
+    // 69 as of Phase 1, +3 in session 2a-ii: GET /users/roles,
+    // PATCH /users/{id}/role, GET /permissions.
+    expect(operations.length).toBe(72);
   });
 
   it.each(operations)('$key never types 200 as the error envelope', ({ key, schema }) => {

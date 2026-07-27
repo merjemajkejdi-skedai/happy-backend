@@ -7,7 +7,7 @@ import { serializeModifierOption } from './serializers';
 
 export const modifiersRouter = Router();
 
-modifiersRouter.get('/modifier-groups', async (req: Request, res: Response) => {
+modifiersRouter.get('/modifier-groups', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const { page, perPage } = parsePagination(req.query);
   const result = await modifiersService.listModifierGroups(req.auth!.venueId, { page, perPage });
   sendData(

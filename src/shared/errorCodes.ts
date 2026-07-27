@@ -28,13 +28,15 @@ export const ERROR_CODES = [
   'PIN_LENGTH_OUT_OF_RANGE',
 
   // ── Users ────────────────────────────────────────────────────────────────
-  'ROLE_NOT_AVAILABLE_IN_PHASE_1',
   'CREDENTIALS_REQUIRED',
   'EMAIL_ALREADY_IN_USE',
   'PIN_ALREADY_IN_USE',
   'DUPLICATE_CREDENTIAL',
   'CANNOT_MODIFY_SELF',
   'EMAIL_REQUIRED_FOR_PASSWORD',
+
+  // ── Permissions (Phase 2, session 2a-ii) ────────────────────────────────
+  'INSUFFICIENT_ROLE_AUTHORITY',
 
   // ── Areas ────────────────────────────────────────────────────────────────
   'AREA_HAS_ACTIVE_TABLES',
