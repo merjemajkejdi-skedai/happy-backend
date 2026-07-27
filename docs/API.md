@@ -161,6 +161,16 @@ Replaces Phase 1's void behavior entirely (including on the legacy `DELETE /orde
 | GET | `/voids` | `reports.view` | All void log rows, filterable by `?from&to` (business_date), `?status`, `?user_id`, paginated. | — |
 | GET | `/voids/{id}` | `reports.view` | A single void log row. | — |
 
+## Orders — split equal (Phase 2, session 2f-i)
+
+Requires `split_bill_enabled` AND `split_equal_enabled`, else 403 `SPLIT_MODE_DISABLED`. Items stay on the parent order; each child receives one synthetic line item (`item_name_snapshot: 'Split N of M'`, `menu_item_id: null`, `destination_snapshot: 'none'`) whose price is that child's exact share of the parent's `grand_total` (remainder-to-child-1 rounding — shares always sum exactly). Blocked once `amount_paid > 0` on the order in question (409 `ORDER_ALREADY_PAID`).
+
+| Method | Path | Permission | Description | Gating flag(s) |
+|---|---|---|---|---|
+| POST | `/orders/{id}/split` | `order.split` | `{split_type: 'equal', ways}` — `ways` between 2 and `split_max_ways` (422 `SPLIT_WAYS_INVALID` otherwise). Creates `ways` child orders (own `order_number`/`ticket_number`, `parent_order_id`, `split_type='equal'`, `split_sequence` 1..n), each `status='served'` since the synthetic item needs no kitchen/bar prep. One transaction — any failure rolls back all children. Returns the array of created child orders. | `split_bill_enabled`, `split_equal_enabled` |
+| GET | `/orders/{id}/splits` | `order.view_own` | The child orders for a given parent, ordered by `split_sequence`. | — |
+| POST | `/orders/{id}/splits/{childId}/merge-back` | `order.split` | Undo — only while the child is unpaid (409 `ORDER_ALREADY_PAID` otherwise). Deletes the child order (its synthetic item cascades), then recomputes the parent (a no-op in practice, since the parent's own items were never touched by the split). | — |
+
 ## Orders — course firing (Phase 2, session 2c)
 
 Every route below requires `send_by_course=true` AND `venue_type` in (`happy_restaurant`, `happy_hybrid`) — 403 `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` otherwise (venue type checked first).

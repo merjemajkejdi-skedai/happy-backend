@@ -117,6 +117,11 @@ export const ERROR_CODES = [
   'INSUFFICIENT_STOCK',
   'ITEM_NOT_STOCK_TRACKED',
 
+  // ── Orders — split (Phase 2, session 2f-i) ───────────────────────────────
+  'SPLIT_MODE_DISABLED',
+  'SPLIT_WAYS_INVALID',
+  'ORDER_ALREADY_PAID',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',

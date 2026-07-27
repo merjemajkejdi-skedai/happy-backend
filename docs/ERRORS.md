@@ -99,7 +99,7 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `COUNTER_SERVICE_DISABLED` | 422 | `service_mode: 'counter'` at a venue with `counter_service_enabled=false`. |
 | `TABLE_ID_REQUIRED` / `TABLE_ID_NOT_ALLOWED` | 422 | `table_id` missing for table mode, or present for counter mode. |
 | `TABLE_ALREADY_HAS_ACTIVE_ORDER` | 409 | The target table already has an active order (DB partial-unique-index enforced). |
-| `ORDER_NOT_MODIFIABLE` | 409 | Adding an item to an order whose status is `served`/`closed`/`cancelled`. |
+| `ORDER_NOT_MODIFIABLE` | 409 | Adding an item to an order whose status is `served`/`closed`/`cancelled`. Also fired by `POST /orders/:id/split` on a `closed`/`cancelled` order (Phase 2, session 2f-i). |
 | `MENU_ITEM_UNAVAILABLE` | 422 | The menu item is 86'd (`is_available=false`) or no longer exists. |
 | `MODIFIER_SELECTION_INVALID` | 422 | A submitted modifier option id doesn't resolve to a real, active option at this venue. Fires regardless of `require_modifier_validation` — this is referential integrity, not a business rule. |
 | `MODIFIER_GROUP_REQUIRED` | 422 | An attached group with `is_required=true` has zero selections. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
@@ -110,6 +110,9 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `MODIFIER_DESTINATION_MISMATCH` | 422 | A selected option's group has an `applies_to_destination` that doesn't match this item's destination. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
 | `INSUFFICIENT_STOCK` | 409 | `POST /orders/:id/items` for a stock-tracked item with fewer than `quantity` remaining and `allow_negative_stock=false`. The atomic decrement itself — not a pre-check — is what raises this. Phase 2, session 2e. |
 | `ITEM_NOT_STOCK_TRACKED` | 422 | `PATCH /menu/items/:id/stock {delta}` on an item with no existing stock row for today — there's no baseline to adjust; use `{starting_quantity}` first. Phase 2, session 2e. |
+| `SPLIT_MODE_DISABLED` | 403 | `POST /orders/:id/split` while `split_bill_enabled=false` or `split_equal_enabled=false`. Phase 2, session 2f-i. |
+| `SPLIT_WAYS_INVALID` | 422 | `POST /orders/:id/split` with `ways` outside `[2, split_max_ways]`. Phase 2, session 2f-i. |
+| `ORDER_ALREADY_PAID` | 409 | `POST /orders/:id/split` on an order with `amount_paid > 0`, or `POST /orders/:id/splits/:childId/merge-back` on a child that's already been paid. Phase 2, session 2f-i. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |
