@@ -116,8 +116,9 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | POST | `/orders` | `order.create` | Create an order (table or counter mode). `Idempotency-Key` aware. | `require_table_for_order`, `counter_service_enabled` |
 | GET | `/orders/{id}` | (any authenticated role) | Full order — items with modifiers, `table_display_label`, `opened_by_name`, totals. `pms_*` omitted unless `pms_enabled`. | — |
 | PATCH | `/orders/{id}` | `order.create` | Update `guest_count`/`customer_name`/`notes` only. | — |
-| POST | `/orders/{id}/items` | `order.create` | Add an item — snapshots the menu at insert time so later menu edits never touch this order. `Idempotency-Key` aware. | `allow_free_text_notes`, `courses_enabled` |
-| PATCH | `/orders/{id}/items/{itemId}` | `order.create` | Update quantity/notes/modifiers — only while the item is `pending`. | `allow_free_text_notes` |
+| POST | `/orders/{id}/items` | `order.create` | Add an item — snapshots the menu at insert time so later menu edits never touch this order. `price_delta_snapshot` for each modifier is resolved via `resolveModifierPrice` (free/fixed/tiered), never the raw stored `price_delta`. `Idempotency-Key` aware. | `allow_free_text_notes`, `courses_enabled`, `require_modifier_validation` |
+| PATCH | `/orders/{id}/items/{itemId}` | `order.create` | Update quantity/notes/modifiers — only while the item is `pending`. | `allow_free_text_notes`, `require_modifier_validation` |
+| PATCH | `/orders/{id}/items/{itemId}/modifiers` | `order.create` | Replace an item's modifier selections only — only while `pending`, otherwise 409 `ITEM_ALREADY_SENT`. Revalidates and recomputes totals. | `require_modifier_validation` |
 | DELETE | `/orders/{id}/items/{itemId}` | `order.create` (+ `order.void_after_send` once sent) | Void an item — any waiter while pending; admin-only once sent, and only if `allow_item_void_after_send`. | `allow_item_void_after_send`, `require_reason_on_void` |
 
 ## Orders — lifecycle

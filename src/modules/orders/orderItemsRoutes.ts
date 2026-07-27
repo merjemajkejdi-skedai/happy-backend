@@ -38,6 +38,15 @@ orderItemsRouter.patch('/:itemId', requirePermission('order.create'), async (req
   sendData(res, serializeOrderItem(result.value));
 });
 
+orderItemsRouter.patch('/:itemId/modifiers', requirePermission('order.create'), async (req: Request, res: Response) => {
+  const { modifier_option_ids } = req.body ?? {};
+  if (!Array.isArray(modifier_option_ids)) return sendError(res, 'VALIDATION_ERROR', 'modifier_option_ids must be an array');
+
+  const result = await orderItemsService.setItemModifiers(req.auth!.venueId, req.auth!.userId, req.params.id, req.params.itemId, modifier_option_ids);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, serializeOrderItem(result.value));
+});
+
 // Void. Permission split lives in the service (voidItem): status 'pending'
 // only needs order.create (this route's own gate); anything past 'pending'
 // additionally needs order.void_after_send, checked against the flag.

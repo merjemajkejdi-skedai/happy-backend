@@ -86,6 +86,14 @@ export const ERROR_CODES = [
   'VOID_REASON_REQUIRED',
   'MODIFIER_SELECTION_INVALID',
 
+  // ── Orders — modifier validation (Phase 2, session 2b-ii) ───────────────
+  'MODIFIER_GROUP_REQUIRED',
+  'MODIFIER_MIN_NOT_MET',
+  'MODIFIER_MAX_EXCEEDED',
+  'MODIFIER_OPTION_NOT_IN_GROUP',
+  'MODIFIER_DUPLICATE_SELECTION',
+  'MODIFIER_DESTINATION_MISMATCH',
+
   // ── Orders (lifecycle) ───────────────────────────────────────────────────
   'NO_PENDING_ITEMS',
   'TRANSFER_DISABLED',

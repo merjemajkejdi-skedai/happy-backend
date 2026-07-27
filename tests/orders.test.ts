@@ -236,7 +236,7 @@ describe('Modifier validation matrix', () => {
     const result = await orderItemsService.addItem(fx.venueId, fx.adminUserId, orderId, { menuItemId: fx.itemId, modifierOptionIds: [] });
     expect(result).toEqual({
       ok: false,
-      error: { status: 422, code: 'MODIFIER_SELECTION_INVALID', message: '"Toppings" requires at least 1 selection(s)' },
+      error: { status: 422, code: 'MODIFIER_GROUP_REQUIRED', message: '"Toppings" requires a selection' },
     });
   });
 
@@ -247,7 +247,7 @@ describe('Modifier validation matrix', () => {
     });
     expect(result).toEqual({
       ok: false,
-      error: { status: 422, code: 'MODIFIER_SELECTION_INVALID', message: '"Toppings" allows only one selection' },
+      error: { status: 422, code: 'MODIFIER_MAX_EXCEEDED', message: '"Toppings" allows only one selection' },
     });
   });
 

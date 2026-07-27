@@ -101,7 +101,13 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `TABLE_ALREADY_HAS_ACTIVE_ORDER` | 409 | The target table already has an active order (DB partial-unique-index enforced). |
 | `ORDER_NOT_MODIFIABLE` | 409 | Adding an item to an order whose status is `served`/`closed`/`cancelled`. |
 | `MENU_ITEM_UNAVAILABLE` | 422 | The menu item is 86'd (`is_available=false`) or no longer exists. |
-| `MODIFIER_SELECTION_INVALID` | 422 | The submitted `modifier_option_ids` don't satisfy the attached groups' `type`/`min_select`/`max_select`/`is_required` rules, or reference an option that isn't attached to this item. |
+| `MODIFIER_SELECTION_INVALID` | 422 | A submitted modifier option id doesn't resolve to a real, active option at this venue. Fires regardless of `require_modifier_validation` — this is referential integrity, not a business rule. |
+| `MODIFIER_GROUP_REQUIRED` | 422 | An attached group with `is_required=true` has zero selections. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `MODIFIER_MIN_NOT_MET` | 422 | A group has 1+ selections but fewer than its `min_select`. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `MODIFIER_MAX_EXCEEDED` | 422 | A group's selection count exceeds its `max_select` (or, for `type='single'`, more than one selection). Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `MODIFIER_OPTION_NOT_IN_GROUP` | 422 | A selected option's group isn't attached to this item. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `MODIFIER_DUPLICATE_SELECTION` | 422 | The same modifier option id appears more than once in one request. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `MODIFIER_DESTINATION_MISMATCH` | 422 | A selected option's group has an `applies_to_destination` that doesn't match this item's destination. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |
