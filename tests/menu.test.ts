@@ -272,6 +272,8 @@ describe('Full menu tree — shape and sorting', () => {
     expect(toppings.name).toBe('Toppings');
     expect(toppings.options.map(o => o.name)).toEqual(['No Cheese', 'Extra Cheese']);
     expect(toppings.options.every(o => typeof o.priceDelta === 'number')).toBe(true);
+    expect(toppings.options.every(o => typeof o.isDefault === 'boolean')).toBe(true);
+    expect(toppings.resolvedPricingMode).toBe('fixed');
 
     expect(typeof itemWithGroup.price).toBe('number');
     expect(itemWithGroup.price).toBe(6);

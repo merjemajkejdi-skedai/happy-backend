@@ -4,7 +4,7 @@ import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as itemsService from './itemsService';
 import * as modifiersService from './modifiersService';
-import { serializeMenuItem } from './serializers';
+import { serializeMenuItem, serializeModifierOption } from './serializers';
 
 export const itemsRouter = Router();
 
@@ -92,6 +92,12 @@ itemsRouter.patch('/:id/availability', requireResolvedPermission('menu.eightysix
   const result = await itemsService.setItemAvailability(req.auth!.venueId, req.params.id, is_available);
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
   sendData(res, serializeMenuItem(result.value));
+});
+
+itemsRouter.get('/:id/modifier-groups', requirePermission('menu.view'), async (req: Request, res: Response) => {
+  const result = await modifiersService.getItemModifierGroups(req.auth!.venueId, req.params.id);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, result.value.map(g => ({ ...g, options: g.options.map(serializeModifierOption) })));
 });
 
 // Replaces the full set of modifier groups attached to this item.

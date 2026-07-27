@@ -64,6 +64,11 @@ export const ERROR_CODES = [
   'DESTINATION_NOT_AVAILABLE',
   'COURSES_DISABLED',
 
+  // ── Menu — modifier groups (Phase 2, session 2b-i) ──────────────────────
+  'INVALID_TIER_PRICES',
+  'MODIFIER_GROUP_LIMIT_EXCEEDED',
+  'MODIFIER_GROUP_HAS_ATTACHED_ITEMS',
+
   // ── Orders (core + items) ────────────────────────────────────────────────
   // (TABLE_REQUIRED_FOR_ORDER is reused from Settings above — same meaning,
   // fired here when an order tries counter mode at a venue that requires a

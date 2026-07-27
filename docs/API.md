@@ -95,13 +95,16 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | GET | `/menu/items/{id}` | (any authenticated role) | Get an item. | — |
 | PATCH | `/menu/items/{id}` | `menu.write` | Update an item. | `venue_type`, `courses_enabled` |
 | DELETE | `/menu/items/{id}` | `menu.write` | Soft-delete. | — |
-| PATCH | `/menu/items/{id}/availability` | `menu.availability` (waiter, kitchen, admin) | The "86" toggle. | — |
-| POST | `/menu/items/{id}/modifier-groups` | `menu.write` | Replace the full set of modifier groups attached to this item. | — |
-| GET | `/menu/modifier-groups` | (any authenticated role) | List groups with their options, paginated. | `modifiers_enabled` (informational — not enforced server-side in Phase 1) |
-| POST | `/menu/modifier-groups` | `menu.write` | Create a group — `min_select`/`max_select` validated against `type`/`is_required`. | — |
-| PATCH | `/menu/modifier-groups/{id}` | `menu.write` | Update a group. | — |
-| DELETE | `/menu/modifier-groups/{id}` | `menu.write` | Soft-delete. | — |
-| POST | `/menu/modifier-groups/{id}/options` | `menu.write` | Add an option. | — |
+| PATCH | `/menu/items/{id}/availability` | `menu.eightysix` (S) | The "86" toggle. | `eightysix_requires_manager` |
+| GET | `/menu/items/{id}/modifier-groups` | (any authenticated role) | Resolved groups + options + defaults attached to this item, in attachment sort order. | — |
+| POST | `/menu/items/{id}/modifier-groups` | `menu.write` | Replace the full set of modifier groups attached to this item. 422 `MODIFIER_GROUP_LIMIT_EXCEEDED` past `modifier_max_groups_per_item`. | `modifier_max_groups_per_item` |
+| GET | `/menu/modifier-groups` | (any authenticated role) | List groups with their options, paginated. `?include_inactive=true` also returns `is_active=false` groups (soft-deleted groups are never returned). | `modifiers_enabled` (informational — not enforced server-side) |
+| POST | `/menu/modifier-groups` | `menu.write` | Create a group — `min_select`/`max_select` validated against `type`/`is_required`; `pricing_mode`/`applies_to_destination`/`display_style`/`is_active` accepted (Phase 2). `applies_to_destination` validated against `venue_type` like a category/item destination. | `venue_type` |
+| PATCH | `/menu/modifier-groups/{id}` | `menu.write` | Update a group. | `venue_type` |
+| DELETE | `/menu/modifier-groups/{id}` | `menu.write` | Soft-delete — 409 `MODIFIER_GROUP_HAS_ATTACHED_ITEMS` if still attached to an active menu item. | — |
+| PATCH | `/menu/modifier-groups/{id}/reorder` | `menu.write` | Set `sort_order` positionally from the given `group_ids` array. | — |
+| POST | `/menu/modifier-groups/{id}/duplicate` | `menu.write` | Copy a group's config and options into a new group named `"<name> (copy)"`. Does not copy item attachments. | — |
+| POST | `/menu/modifier-groups/{id}/options` | `menu.write` | Add an option — `is_default`/`stock_tracked`/`tier_prices` accepted (Phase 2). `tier_prices` only accepted when the group's `pricing_mode='tiered'`. | — |
 | PATCH | `/menu/modifier-options/{id}` | `menu.write` | Update an option. | — |
 | DELETE | `/menu/modifier-options/{id}` | `menu.write` | Soft-delete. | — |
 

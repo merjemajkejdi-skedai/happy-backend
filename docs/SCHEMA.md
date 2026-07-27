@@ -53,7 +53,7 @@ No routes or business logic exist yet. This is schema only.
 |---|---|
 | `menu_categories` | Soft-deletable. `default_destination` (kitchen/bar/none) and `default_course_number` are the fallback every item in the category inherits unless overridden. |
 | `menu_items` | Soft-deletable. `is_active` (exists in the system) vs `is_available` (the "86" toggle — temporarily out of stock, doesn't require re-creating the item) are distinct on purpose. `sku` is optionally unique per venue. |
-| `modifier_groups` / `modifier_options` | Soft-deletable. A group is `single` or `multiple` select, with `min_select`/`max_select` bounds; options carry a `price_delta`. |
+| `modifier_groups` / `modifier_options` | Soft-deletable. A group is `single` or `multiple` select, with `min_select`/`max_select` bounds; options carry a `price_delta`. **Phase 2:** groups add `pricing_mode` (`free`/`fixed`/`tiered` — resolved against `restaurant_settings.modifier_pricing_mode` by `resolveModifierPrice()`, see `src/modules/menu/modifierPricing.ts`), `applies_to_destination` (validated like a category/item destination), `display_style`, and `is_active` (distinct from soft-delete — a temporarily-hidden group, same convention as `menu_items.is_available`); options add `is_default`, `stock_tracked`, and `tier_prices jsonb` (only meaningful when the parent group's `pricing_mode='tiered'` — `{"1":0,"2":50}` maps 1-indexed selection ordinal to price). |
 | `menu_item_modifier_groups` | Join table, composite PK `(menu_item_id, group_id)`. `overrides_required` lets a specific item override a group's own `is_required` flag. No soft-delete, no timestamps — pure link row. |
 
 ### Orders

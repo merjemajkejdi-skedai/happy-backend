@@ -1,6 +1,7 @@
 import crypto from 'crypto';
+import { prisma } from '../../db/prisma';
 import { scopedPrisma } from '../../middleware/venueScope';
-import type { MenuCategory, MenuItem, ModifierGroup, ModifierOption } from '../../generated/prisma/client';
+import type { MenuCategory, MenuItem, ModifierGroup, ModifierOption, ModifierPricing } from '../../generated/prisma/client';
 import { serializeMenuItem, serializeModifierOption } from './serializers';
 
 type SerializedOption = ReturnType<typeof serializeModifierOption>;
@@ -8,6 +9,10 @@ type SerializedItem = ReturnType<typeof serializeMenuItem>;
 
 export interface TreeModifierGroup extends ModifierGroup {
   options: SerializedOption[];
+  // group.pricing_mode overrides settings.modifier_pricing_mode (see
+  // modifierPricing.ts) — spelled out here so POS clients never need to
+  // fetch settings just to know which price a group's options will use.
+  resolvedPricingMode: ModifierPricing;
 }
 
 export interface TreeItem extends SerializedItem {
@@ -28,7 +33,7 @@ export interface MenuTree {
 // venueScope extension's $allOperations wrapper, verified in the tables
 // module), no per-category/per-item round trips.
 export async function getMenuTree(venueId: string): Promise<MenuTree> {
-  const [categories, items, groups] = await Promise.all([
+  const [categories, items, groups, settings] = await Promise.all([
     scopedPrisma.menuCategory.findMany({
       where: { venueId, isActive: true, deletedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -38,9 +43,10 @@ export async function getMenuTree(venueId: string): Promise<MenuTree> {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
     scopedPrisma.modifierGroup.findMany({
-      where: { venueId, deletedAt: null },
+      where: { venueId, isActive: true, deletedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
+    prisma.restaurantSettings.findUniqueOrThrow({ where: { venueId } }),
   ]);
 
   const groupIds = groups.map(g => g.id);
@@ -90,7 +96,11 @@ export async function getMenuTree(venueId: string): Promise<MenuTree> {
       modifierGroups: (linksByItem.get(item.id) ?? [])
         .map(link => groupsById.get(link.groupId))
         .filter((g): g is ModifierGroup => !!g)
-        .map(group => ({ ...group, options: optionsByGroup.get(group.id) ?? [] })),
+        .map(group => ({
+          ...group,
+          options: optionsByGroup.get(group.id) ?? [],
+          resolvedPricingMode: group.pricingMode ?? settings.modifierPricingMode,
+        })),
     })),
   }));
 

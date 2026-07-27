@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma';
-import type { VenueType, Destination } from '../../generated/prisma/client';
+import type { VenueType, Destination, ModifierPricing } from '../../generated/prisma/client';
 import { err, type DomainError } from '../../lib/domainError';
 
 export { err };
@@ -8,6 +8,9 @@ export type MenuDomainError = DomainError;
 export interface VenueMenuContext {
   venueType: VenueType;
   coursesEnabled: boolean;
+  // Phase 2 (session 2b-i) — modifier-group config needs these two.
+  modifierPricingMode: ModifierPricing;
+  modifierMaxGroupsPerItem: number;
 }
 
 export async function getVenueContext(venueId: string): Promise<VenueMenuContext> {
@@ -16,7 +19,12 @@ export async function getVenueContext(venueId: string): Promise<VenueMenuContext
     prisma.restaurantSettings.findUnique({ where: { venueId } }),
   ]);
   if (!venue || !settings) throw new Error(`venue or settings missing for ${venueId}`);
-  return { venueType: venue.venueType, coursesEnabled: settings.coursesEnabled };
+  return {
+    venueType: venue.venueType,
+    coursesEnabled: settings.coursesEnabled,
+    modifierPricingMode: settings.modifierPricingMode,
+    modifierMaxGroupsPerItem: settings.modifierMaxGroupsPerItem,
+  };
 }
 
 // Applied to both a category's default_destination and an item's own

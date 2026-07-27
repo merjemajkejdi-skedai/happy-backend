@@ -85,8 +85,11 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `CATEGORY_HAS_ACTIVE_ITEMS` | 409 | Deleting a category that still has active menu items. |
 | `SKU_ALREADY_IN_USE` | 409 | That SKU is already used by another active item at this venue. |
 | `INVALID_MAX_SELECT` / `INVALID_MIN_SELECT` | 422 | Modifier group `min_select`/`max_select` violate the rules for its `type`/`is_required`. |
-| `DESTINATION_NOT_AVAILABLE` | 422 | `destination` isn't valid for the venue's type (`bar` at a `happy_restaurant`, `kitchen` at a `happy_bar`). |
+| `DESTINATION_NOT_AVAILABLE` | 422 | `destination` isn't valid for the venue's type (`bar` at a `happy_restaurant`, `kitchen` at a `happy_bar`) — applies to a modifier group's `applies_to_destination` too. |
 | `COURSES_DISABLED` | 422 | A non-null `course_number` submitted while `courses_enabled` is false. |
+| `INVALID_TIER_PRICES` | 422 | A modifier option's `tier_prices` submitted while the group's `pricing_mode` isn't `tiered`, or malformed (keys must be positive-integer strings, values numbers >= 0). Phase 2, session 2b-i. |
+| `MODIFIER_GROUP_LIMIT_EXCEEDED` | 422 | `POST /menu/items/:id/modifier-groups` would attach more than `modifier_max_groups_per_item` groups to one item. Phase 2, session 2b-i. |
+| `MODIFIER_GROUP_HAS_ATTACHED_ITEMS` | 409 | Deleting a modifier group that's still attached to an active menu item. Phase 2, session 2b-i. |
 
 ## Orders — core (`/orders`, `/orders/:id/items`)
 
