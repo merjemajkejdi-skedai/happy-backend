@@ -19,13 +19,37 @@ function parseDisplayQuery(req: Request) {
 displaysRouter.get('/kitchen', requireDisplayScope('kitchen'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'kitchen', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts }, result.value.meta as unknown as Record<string, unknown>);
+  sendData(
+    res,
+    { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts, void_alerts: result.value.voidAlerts },
+    result.value.meta as unknown as Record<string, unknown>,
+  );
 });
 
 displaysRouter.get('/bar', requireDisplayScope('bar'), async (req: Request, res: Response) => {
   const result = await displaysService.getDisplay(req.auth!.venueId, 'bar', parseDisplayQuery(req));
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts }, result.value.meta as unknown as Record<string, unknown>);
+  sendData(
+    res,
+    { tickets: result.value.tickets, fire_alerts: result.value.fireAlerts, void_alerts: result.value.voidAlerts },
+    result.value.meta as unknown as Record<string, unknown>,
+  );
+});
+
+// Standalone alert feed — both kitchen- and bar-destination void alerts
+// together, since the route has no /kitchen or /bar segment (unlike fire
+// alerts' GET /displays/kitchen/fire-alerts). No availability gate — unlike
+// course firing, void alerts have no venue-type restriction, only the
+// void_alerts_kitchen setting (already applied inside the service).
+displaysRouter.get('/void-alerts', requirePermission('display.view'), async (req: Request, res: Response) => {
+  const alerts = await displaysService.getVoidAlerts(req.auth!.venueId);
+  sendData(res, alerts);
+});
+
+displaysRouter.post('/void-alerts/:id/ack', requirePermission('display.bump'), async (req: Request, res: Response) => {
+  const result = await displaysService.ackVoidAlert(req.auth!.venueId, req.params.id);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, { acknowledged: true });
 });
 
 // Standalone alert feed — gated by the same "send_by_course AND venue type"

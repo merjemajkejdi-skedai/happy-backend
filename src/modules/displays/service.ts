@@ -4,7 +4,7 @@ import { computeDisplayLabel } from '../tables/service';
 import { err, type OrderDomainError } from '../orders/validation';
 import { recomputeOrder } from '../orders/ordersService';
 import { checkCoursesAvailable } from '../orders/coursesService';
-import { buildTicket, buildMeta, buildFireAlert, type DisplayTicketDTO, type DisplayMetaDTO, type FireAlertDTO } from './serializers';
+import { buildTicket, buildMeta, buildFireAlert, buildVoidAlert, type DisplayTicketDTO, type DisplayMetaDTO, type FireAlertDTO, type VoidAlertDTO } from './serializers';
 import { Prisma, type OrderItem, type OrderItemModifier, type OrderItemStatus, type Destination } from '../../generated/prisma/client';
 
 export type DisplayResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
@@ -86,7 +86,7 @@ export async function getDisplay(
   venueId: string,
   destination: Extract<Destination, 'kitchen' | 'bar'>,
   params: GetDisplayParams,
-): Promise<DisplayResult<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO; fireAlerts: FireAlertDTO[] }>> {
+): Promise<DisplayResult<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO; fireAlerts: FireAlertDTO[]; voidAlerts: VoidAlertDTO[] }>> {
   const settings = await getSettings(venueId);
   const enabled = destination === 'kitchen' ? settings.kitchenDisplayEnabled : settings.barDisplayEnabled;
   if (!enabled) return { ok: false, error: err(403, 'DISPLAY_DISABLED', `The ${destination} display is not enabled for this venue`) };
@@ -96,8 +96,12 @@ export async function getDisplay(
   if (params.courseNumber != null) where.courseNumberSnapshot = params.courseNumber;
 
   const now = new Date();
-  const [tickets, fireAlerts] = await Promise.all([buildTickets(venueId, where, now), getEmbeddedFireAlerts(venueId)]);
-  return { ok: true, value: { tickets, meta: buildMeta(settings.displayAutoRefreshSeconds, tickets, now), fireAlerts } };
+  const [tickets, fireAlerts, voidAlerts] = await Promise.all([
+    buildTickets(venueId, where, now),
+    getEmbeddedFireAlerts(venueId),
+    getEmbeddedVoidAlerts(venueId, destination),
+  ]);
+  return { ok: true, value: { tickets, meta: buildMeta(settings.displayAutoRefreshSeconds, tickets, now), fireAlerts, voidAlerts } };
 }
 
 export async function getRecallDisplay(venueId: string): Promise<{ tickets: DisplayTicketDTO[]; meta: DisplayMetaDTO }> {
@@ -277,5 +281,63 @@ export async function ackFireAlert(venueId: string, courseId: string): Promise<D
   const course = await scopedPrisma.orderCourse.findFirst({ where: { id: courseId, venueId } });
   if (!course) return { ok: false, error: err(404, 'NOT_FOUND', 'Fire alert not found') };
   await scopedPrisma.orderCourse.update({ where: { id: courseId }, data: { fireAlertAckedAt: new Date() } });
+  return { ok: true, value: null };
+}
+
+// ── Void alerts (Phase 2, session 2d-ii) ────────────────────────────────────
+//
+// Emitted only for stage='after_send' voids that reached approved/
+// auto_approved — a pending request emits nothing, so the kitchen never
+// stops cooking something that may end up not being voided. Gated by the
+// single settings.void_alerts_kitchen flag for both kitchen- and bar-
+// destination alerts (there's no separate *_bar flag in the schema).
+async function buildVoidAlerts(venueId: string, destination?: Extract<Destination, 'kitchen' | 'bar'>): Promise<VoidAlertDTO[]> {
+  const settings = await getSettings(venueId);
+  if (!settings.voidAlertsKitchen) return [];
+
+  const where: Prisma.RestaurantVoidLogWhereInput = {
+    venueId,
+    stage: 'after_send',
+    status: { in: ['approved', 'auto_approved'] },
+    voidAlertAckedAt: null,
+  };
+  if (destination) where.destinationSnapshot = destination;
+
+  const logs = await scopedPrisma.restaurantVoidLog.findMany({ where, orderBy: { resolvedAt: 'desc' } });
+  if (logs.length === 0) return [];
+
+  // "Set kitchen_notified_at when first surfaced" — set once, never
+  // overwritten, so only rows that don't have it yet are touched here.
+  const toNotify = logs.filter(l => !l.kitchenNotifiedAt).map(l => l.id);
+  if (toNotify.length > 0) {
+    await scopedPrisma.restaurantVoidLog.updateMany({ where: { id: { in: toNotify }, venueId }, data: { kitchenNotifiedAt: new Date() } });
+  }
+
+  const orderIds = [...new Set(logs.map(l => l.orderId))];
+  const orders = await scopedPrisma.order.findMany({ where: { id: { in: orderIds }, venueId } });
+  const ordersById = new Map(orders.map(o => [o.id, o]));
+
+  return logs.map(log => buildVoidAlert(log, ordersById.get(log.orderId) ?? null));
+}
+
+// Unconditional (like getEmbeddedFireAlerts) — embedded in the per-
+// destination kitchen/bar ticket responses, so only that destination's
+// voided items are ever surfaced there (2d-ii section 4: "a voided bar item
+// never appears on the kitchen display").
+export async function getEmbeddedVoidAlerts(venueId: string, destination: Extract<Destination, 'kitchen' | 'bar'>): Promise<VoidAlertDTO[]> {
+  return buildVoidAlerts(venueId, destination);
+}
+
+// Standalone GET /displays/void-alerts — no destination segment in its path
+// (unlike GET /displays/kitchen/fire-alerts), so this returns both
+// kitchen- and bar-destination alerts together as a consolidated feed.
+export async function getVoidAlerts(venueId: string): Promise<VoidAlertDTO[]> {
+  return buildVoidAlerts(venueId);
+}
+
+export async function ackVoidAlert(venueId: string, voidLogId: string): Promise<DisplayResult<null>> {
+  const log = await scopedPrisma.restaurantVoidLog.findFirst({ where: { id: voidLogId, venueId } });
+  if (!log) return { ok: false, error: err(404, 'NOT_FOUND', 'Void alert not found') };
+  await scopedPrisma.restaurantVoidLog.update({ where: { id: voidLogId }, data: { voidAlertAckedAt: new Date() } });
   return { ok: true, value: null };
 }

@@ -96,6 +96,21 @@ INDEX (venue_id, shift_id)
 
 `void_value` = `quantity * (unit_price_snapshot + modifiers_total)`.
 
+**Session 2d-ii addendum:** one column added, additive migration
+`20260727132613_void_alert_ack`:
+
+| column | type | constraints |
+|---|---|---|
+| void_alert_acked_at | timestamptz | NULL |
+
+Void display alerts (`GET /displays/void-alerts`, and the embedded `void_alerts`
+array on `GET /displays/kitchen`/`/bar`) derive from `stage`/`status`/this column
+rather than a separate table — an alert is "`stage='after_send'` AND `status` in
+(`approved`,`auto_approved`) AND `void_alert_acked_at IS NULL`", gated by
+`settings.void_alerts_kitchen`. Distinct from `kitchen_notified_at` above (a
+first-surfaced marker, set once and never overwritten) — this column is the
+dismissal marker. See `docs/phase2/SESSION-2d-ii.md`.
+
 ---
 
 ## 3. `menu_item_stock`

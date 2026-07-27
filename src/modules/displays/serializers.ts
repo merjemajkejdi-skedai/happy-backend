@@ -1,4 +1,4 @@
-import type { Order, OrderCourse, OrderItem, OrderItemModifier, RestaurantTable, TableNaming } from '../../generated/prisma/client';
+import type { Order, OrderCourse, OrderItem, OrderItemModifier, RestaurantTable, RestaurantVoidLog, TableNaming } from '../../generated/prisma/client';
 import { computeDisplayLabel } from '../tables/service';
 
 // Response shape is locked per spec (snake_case, unlike the rest of this
@@ -164,5 +164,44 @@ export function buildFireAlert(
     expires_at: expiresAt.toISOString(),
     headline: `FIRE ${course.courseNameSnapshot.toUpperCase()} — ${locationForHeadline}`,
     acknowledged: course.fireAlertAckedAt != null,
+  };
+}
+
+// Phase 2, session 2d-ii. Shares the fire alert's envelope fields
+// (id/type/headline/acknowledged) so one client component can render both —
+// see docs/phase2/2d-ii.md section 6 — but does NOT uppercase the item name
+// or location in the headline the way fire alerts uppercase the course name
+// and location; the spec's own example ("VOID — Ribeye 300g — Table 5") only
+// uppercases the "VOID" prefix.
+export interface VoidAlertDTO {
+  id: string;
+  type: 'void';
+  order_number: number;
+  table_label: string | null;
+  item_name: string;
+  quantity: number;
+  destination: string;
+  reason: string | null;
+  voided_by: string | null;
+  headline: string;
+  acknowledged: boolean;
+  created_at: string;
+}
+
+export function buildVoidAlert(voidLog: RestaurantVoidLog, order: Order | null): VoidAlertDTO {
+  const locationLabel = voidLog.tableLabelSnapshot ?? (order?.ticketNumber ? `Ticket ${order.ticketNumber}` : null);
+  return {
+    id: voidLog.id,
+    type: 'void',
+    order_number: voidLog.orderNumber,
+    table_label: voidLog.tableLabelSnapshot,
+    item_name: voidLog.itemNameSnapshot,
+    quantity: voidLog.quantity,
+    destination: voidLog.destinationSnapshot,
+    reason: voidLog.reasonText ?? voidLog.reasonCode ?? null,
+    voided_by: voidLog.approvedByName,
+    headline: `VOID — ${voidLog.itemNameSnapshot}${locationLabel ? ` — ${locationLabel}` : ''}`,
+    acknowledged: voidLog.voidAlertAckedAt != null,
+    created_at: (voidLog.resolvedAt ?? voidLog.requestedAt).toISOString(),
   };
 }

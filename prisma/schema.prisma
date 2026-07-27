@@ -873,6 +873,10 @@ model RestaurantVoidLog {
   rejectionReason      String?     @map("rejection_reason")
   kitchenNotifiedAt    DateTime?   @map("kitchen_notified_at") @db.Timestamptz
   tableLabelSnapshot   String?     @map("table_label_snapshot")
+  // Phase 2, session 2d-ii — void display alerts ack, distinct from
+  // kitchen_notified_at (first-surfaced marker vs. dismissed marker). See
+  // docs/phase2/SESSION-2d-ii.md.
+  voidAlertAckedAt     DateTime?   @map("void_alert_acked_at") @db.Timestamptz
   createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

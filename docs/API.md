@@ -169,6 +169,15 @@ Same "backend composes the headline" rule as the rest of the displays module —
 | GET | `/displays/kitchen/fire-alerts` | `display.view` | Alerts fired within the last `show_fire_alert_seconds` and not yet acknowledged. | `send_by_course`, `show_fire_alert_seconds` |
 | POST | `/displays/fire-alerts/{id}/ack` | `display.bump` | Acknowledge (dismiss) an alert. `{id}` is the underlying `order_courses.id`. | — |
 
+## Displays — void alerts (Phase 2, session 2d-ii)
+
+Same envelope pattern as fire alerts (shared `id`/`type`/`headline`/`acknowledged` fields, `type: 'void'` here) — see `docs/phase2/SESSION-2d-ii.md`. Emitted only for a void that reached `stage='after_send'` and `status` `approved`/`auto_approved` — a void still `pending_approval` never shows here, so a kitchen never stops cooking something that might not end up voided. `GET /displays/kitchen`/`/bar` additively gain a `void_alerts` array, filtered to that destination only (a voided bar item never appears on the kitchen display). `GET /displays/void-alerts` below has no destination segment in its path and returns both destinations together as one feed. No availability gate beyond `void_alerts_kitchen` (there's no separate `*_bar` flag — it gates both destinations).
+
+| Method | Path | Permission | Description | Gating flag(s) |
+|---|---|---|---|---|
+| GET | `/displays/void-alerts` | `display.view` | All unacknowledged after-send void alerts, kitchen and bar combined. | `void_alerts_kitchen` |
+| POST | `/displays/void-alerts/{id}/ack` | `display.bump` | Acknowledge (dismiss) an alert. `{id}` is the underlying `restaurant_void_log.id`. Idempotent. | — |
+
 ## Displays
 
 Phase 1 is polling-only — no WebSockets/SSE. Response shape is locked (snake_case, unlike the rest of this API) so a future push-transport swap needs zero client changes.
