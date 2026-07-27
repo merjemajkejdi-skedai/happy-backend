@@ -4,6 +4,7 @@ import { computeDisplayLabel } from '../tables/service';
 import { err, getVenueAndSettings, computeBusinessDate, type OrderDomainError } from './validation';
 import { recomputeOrder } from './ordersService';
 import { resolveVoidPolicy } from './voidPolicy';
+import { restoreStockForVoid } from '../menu/stockService';
 import { Prisma, type RestaurantVoidLog, type UserRole } from '../../generated/prisma/client';
 
 export type VoidResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
@@ -124,8 +125,10 @@ export async function requestVoid(
       where: { id: itemId },
       data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: reasonText ?? reasonCode, voidByUserId: actorUserId, voidId: voidLog.id },
     });
-    // TODO(2e): restore reserved/available stock for menuItemId via a
-    // stock_movements row once stock tracking lands.
+    // Restore on resolution (auto-approved here), not on request — matches
+    // the pending-approval branch above, which never touches stock at all
+    // since the item isn't cancelled yet.
+    await restoreStockForVoid(tx, venueId, itemId, actorUserId);
     await tx.orderEvent.create({
       data: { venueId, orderId, orderItemId: itemId, eventType: 'item.voided', actorUserId, payload: { voidLogId: voidLog.id, reason: reasonText ?? reasonCode } },
     });
@@ -158,7 +161,9 @@ export async function approveVoid(venueId: string, actorUserId: string, voidLogI
           where: { id: voidLog.orderItemId },
           data: { status: 'cancelled', cancelledAt: now, cancelReason: voidLog.reasonText ?? voidLog.reasonCode, voidByUserId: actorUserId, voidId: voidLog.id },
         });
-        // TODO(2e): restore stock, same as the auto-approved path above.
+        // Restore on approval, not on request — same as the auto-approved
+        // path in requestVoid above.
+        await restoreStockForVoid(tx, venueId, voidLog.orderItemId, actorUserId);
         await tx.orderEvent.create({
           data: { venueId, orderId: voidLog.orderId, orderItemId: voidLog.orderItemId, eventType: 'item.voided', actorUserId, payload: { voidLogId: voidLog.id } },
         });

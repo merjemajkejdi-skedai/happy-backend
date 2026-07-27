@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma';
 import { err, getVenueAndSettings, type OrderDomainError } from './validation';
 import { validateCourseNumber } from '../menu/validation';
 import { resolveModifierPrice } from '../menu/modifierPricing';
+import { decrementStockForOrder, businessDateFor } from '../menu/stockService';
 import { recomputeOrder } from './ordersService';
 import { sendItemsCore } from './lifecycleService';
 import {
@@ -15,6 +16,17 @@ import {
 } from '../../generated/prisma/client';
 
 export type OrderItemResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
+
+// Thrown from inside addItem's transaction when the atomic stock decrement
+// (session 2e) fails, so Prisma rolls back the whole insert — caught just
+// outside the transaction and converted back into the normal
+// OrderItemResult error shape, same pattern already used elsewhere in this
+// module for Prisma constraint-violation catches.
+class StockDecrementFailure extends Error {
+  constructor(public readonly domainError: OrderDomainError) {
+    super(domainError.message);
+  }
+}
 
 // An item can only be added/edited while its order is still being built up
 // or actively being served — not once it's fully served, closed, or cancelled.
@@ -172,11 +184,13 @@ export async function addItem(
     return { ok: false, error: err(422, 'VALIDATION_ERROR', 'quantity must be a positive integer') };
   }
 
-  const { settings } = await getVenueAndSettings(venueId);
+  const { venue, settings } = await getVenueAndSettings(venueId);
 
   if (input.notes && !settings.allowFreeTextNotes) {
     return { ok: false, error: err(422, 'NOTES_NOT_ALLOWED', 'Free-text notes are not allowed for this venue') };
   }
+
+  const businessDate = businessDateFor(venue.timezone);
 
   const courseNumberSnapshot = input.courseNumber !== undefined ? input.courseNumber : menuItem.courseNumber;
   const courseError = validateCourseNumber(settings.coursesEnabled, courseNumberSnapshot);
@@ -190,59 +204,71 @@ export async function addItem(
   const taxRateSnapshot = menuItem.taxRatePercent ?? settings.taxRatePercent;
   const lineTotal = unitPriceSnapshot.plus(modifiersTotal).times(quantity);
 
-  const result = await scopedPrisma.$transaction(async tx => {
-    const created = await tx.orderItem.create({
-      data: {
-        orderId,
-        venueId,
-        menuItemId: menuItem.id,
-        itemNameSnapshot: menuItem.name,
-        categoryNameSnapshot: category.name,
-        unitPriceSnapshot,
-        destinationSnapshot: menuItem.destination,
-        courseNumberSnapshot,
-        // Phase 2, session 2c: courseNumber is the live fire target, seeded
-        // from the snapshot at creation but independently movable later via
-        // PATCH .../items/:itemId/course — never merge the two back together.
-        courseNumber: courseNumberSnapshot,
-        taxRateSnapshot,
-        quantity,
-        modifiersTotal,
-        lineTotal,
-        status: 'pending',
-        notes: input.notes ?? null,
-        addedByUserId: actorUserId,
-      },
-    });
-
-    if (lines.length > 0) {
-      await tx.orderItemModifier.createMany({
-        data: lines.map(line => ({ orderItemId: created.id, ...line })),
+  try {
+    const result = await scopedPrisma.$transaction(async tx => {
+      const created = await tx.orderItem.create({
+        data: {
+          orderId,
+          venueId,
+          menuItemId: menuItem.id,
+          itemNameSnapshot: menuItem.name,
+          categoryNameSnapshot: category.name,
+          unitPriceSnapshot,
+          destinationSnapshot: menuItem.destination,
+          courseNumberSnapshot,
+          // Phase 2, session 2c: courseNumber is the live fire target, seeded
+          // from the snapshot at creation but independently movable later via
+          // PATCH .../items/:itemId/course — never merge the two back together.
+          courseNumber: courseNumberSnapshot,
+          taxRateSnapshot,
+          quantity,
+          modifiersTotal,
+          lineTotal,
+          status: 'pending',
+          notes: input.notes ?? null,
+          addedByUserId: actorUserId,
+        },
       });
-    }
 
-    await tx.orderEvent.create({
-      data: {
-        venueId,
-        orderId,
-        orderItemId: created.id,
-        eventType: 'item.added',
-        actorUserId,
-        payload: { menuItemId: menuItem.id, name: created.itemNameSnapshot, quantity },
-      },
+      // Phase 2, session 2e: atomic decrement inside this same transaction —
+      // see stockService.decrementStockForOrder for why this can't be
+      // checked before the transaction starts. Throwing here rolls back the
+      // order-item insert too; caught just below.
+      const decremented = await decrementStockForOrder(tx, venueId, menuItem.id, quantity, created.id, actorUserId, businessDate, settings);
+      if (!decremented.ok) throw new StockDecrementFailure(decremented.error);
+
+      if (lines.length > 0) {
+        await tx.orderItemModifier.createMany({
+          data: lines.map(line => ({ orderItemId: created.id, ...line })),
+        });
+      }
+
+      await tx.orderEvent.create({
+        data: {
+          venueId,
+          orderId,
+          orderItemId: created.id,
+          eventType: 'item.added',
+          actorUserId,
+          payload: { menuItemId: menuItem.id, name: created.itemNameSnapshot, quantity },
+        },
+      });
+
+      if (settings.autoSendOnAdd) {
+        await sendItemsCore(tx, venueId, orderId, actorUserId, [created.id]);
+      } else {
+        await recomputeOrder(tx, venueId, orderId);
+      }
+
+      const finalItem = await tx.orderItem.findUniqueOrThrow({ where: { id: created.id } });
+      const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: created.id } });
+      return { ...finalItem, modifiers };
     });
-
-    if (settings.autoSendOnAdd) {
-      await sendItemsCore(tx, venueId, orderId, actorUserId, [created.id]);
-    } else {
-      await recomputeOrder(tx, venueId, orderId);
-    }
-
-    const finalItem = await tx.orderItem.findUniqueOrThrow({ where: { id: created.id } });
-    const modifiers = await tx.orderItemModifier.findMany({ where: { orderItemId: created.id } });
-    return { ...finalItem, modifiers };
-  });
-  return { ok: true, value: result };
+    return { ok: true, value: result };
+  } catch (e) {
+    if (e instanceof StockDecrementFailure) return { ok: false, error: e.domainError };
+    throw e;
+  }
 }
 
 // ── Update (pending only) ────────────────────────────────────────────────────

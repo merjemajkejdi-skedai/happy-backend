@@ -20,6 +20,8 @@ const VENUE_SCOPED_MODELS = new Set([
   // their own venue_id column but were never added to this set when created
   // in 2a-i.
   'RestaurantVoidLog', 'ApprovalRequest',
+  // Same again for session 2e's stock module.
+  'MenuItemStock', 'StockMovement',
 ]);
 
 // Operations that scan or bulk-touch rows — this is where "forgot to filter

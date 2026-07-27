@@ -11,6 +11,9 @@ export interface VenueMenuContext {
   // Phase 2 (session 2b-i) — modifier-group config needs these two.
   modifierPricingMode: ModifierPricing;
   modifierMaxGroupsPerItem: number;
+  // Phase 2 (session 2e) — is_orderable/stock_remaining need these two.
+  timezone: string;
+  allowNegativeStock: boolean;
 }
 
 export async function getVenueContext(venueId: string): Promise<VenueMenuContext> {
@@ -24,6 +27,8 @@ export async function getVenueContext(venueId: string): Promise<VenueMenuContext
     coursesEnabled: settings.coursesEnabled,
     modifierPricingMode: settings.modifierPricingMode,
     modifierMaxGroupsPerItem: settings.modifierMaxGroupsPerItem,
+    timezone: venue.timezone,
+    allowNegativeStock: settings.allowNegativeStock,
   };
 }
 

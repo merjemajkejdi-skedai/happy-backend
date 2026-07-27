@@ -6,6 +6,7 @@ import { sendData } from '../../lib/response';
 import { categoriesRouter } from './categoriesRoutes';
 import { itemsRouter } from './itemsRoutes';
 import { modifiersRouter } from './modifiersRoutes';
+import { stockRouter } from './stockRoutes';
 import { getMenuTree } from './treeService';
 
 export const menuRouter = Router();
@@ -23,3 +24,4 @@ menuRouter.get('/', requirePermission('menu.view'), async (req: Request, res: Re
 menuRouter.use('/categories', categoriesRouter);
 menuRouter.use('/items', itemsRouter);
 menuRouter.use('/', modifiersRouter); // /modifier-groups, /modifier-options
+menuRouter.use('/', stockRouter); // /stock, /stock/movements, /stock/low, /stock/bulk-set, /stock/day-open

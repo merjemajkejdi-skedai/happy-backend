@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import { prisma } from '../../db/prisma';
 import { scopedPrisma } from '../../middleware/venueScope';
-import type { MenuCategory, MenuItem, ModifierGroup, ModifierOption, ModifierPricing } from '../../generated/prisma/client';
+import type { MenuCategory, MenuItem, ModifierGroup, ModifierOption, ModifierPricing, MenuItemStock } from '../../generated/prisma/client';
 import { serializeMenuItem, serializeModifierOption } from './serializers';
+import { getTodayStockByItem } from './stockService';
 
 type SerializedOption = ReturnType<typeof serializeModifierOption>;
 type SerializedItem = ReturnType<typeof serializeMenuItem>;
@@ -33,7 +34,7 @@ export interface MenuTree {
 // venueScope extension's $allOperations wrapper, verified in the tables
 // module), no per-category/per-item round trips.
 export async function getMenuTree(venueId: string): Promise<MenuTree> {
-  const [categories, items, groups, settings] = await Promise.all([
+  const [categories, items, groups, settings, venue] = await Promise.all([
     scopedPrisma.menuCategory.findMany({
       where: { venueId, isActive: true, deletedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -47,7 +48,12 @@ export async function getMenuTree(venueId: string): Promise<MenuTree> {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
     prisma.restaurantSettings.findUniqueOrThrow({ where: { venueId } }),
+    prisma.venue.findUniqueOrThrow({ where: { id: venueId } }),
   ]);
+
+  // Phase 2, session 2e — is_orderable/stock_remaining need today's stock
+  // row per item, batched in one query regardless of menu size.
+  const stockByItem = await getTodayStockByItem(venueId, venue.timezone, items.map(i => i.id));
 
   const groupIds = groups.map(g => g.id);
   const itemIds = items.map(i => i.id);
@@ -92,7 +98,7 @@ export async function getMenuTree(venueId: string): Promise<MenuTree> {
   const tree: TreeCategory[] = categories.map(category => ({
     ...category,
     items: (itemsByCategory.get(category.id) ?? []).map(item => ({
-      ...serializeMenuItem(item),
+      ...serializeMenuItem(item, stockByItem.get(item.id) ?? null, settings.allowNegativeStock),
       modifierGroups: (linksByItem.get(item.id) ?? [])
         .map(link => groupsById.get(link.groupId))
         .filter((g): g is ModifierGroup => !!g)
@@ -104,7 +110,10 @@ export async function getMenuTree(venueId: string): Promise<MenuTree> {
     })),
   }));
 
-  return { categories: tree, version: computeVersion(categories, items, groups, options, links.length) };
+  return {
+    categories: tree,
+    version: computeVersion(categories, items, groups, options, links.length, [...stockByItem.values()]),
+  };
 }
 
 // Cheap change-detection signal for POS clients to skip re-parsing an
@@ -122,14 +131,19 @@ function computeVersion(
   groups: ModifierGroup[],
   options: ModifierOption[],
   linkCount: number,
+  stockRows: MenuItemStock[],
 ): string {
   const allUpdatedAt = [
     ...categories.map(c => c.updatedAt.getTime()),
     ...items.map(i => i.updatedAt.getTime()),
     ...groups.map(g => g.updatedAt.getTime()),
     ...options.map(o => o.updatedAt.getTime()),
+    // Phase 2, session 2e — an is_86ed toggle or quantity change lives on
+    // menu_item_stock, a different table than every row above, so it needs
+    // its own contribution here or the version hash would miss it entirely.
+    ...stockRows.map(s => s.updatedAt.getTime()),
   ];
   const maxUpdatedAt = allUpdatedAt.length ? Math.max(...allUpdatedAt) : 0;
-  const signature = [maxUpdatedAt, categories.length, items.length, groups.length, options.length, linkCount].join(':');
+  const signature = [maxUpdatedAt, categories.length, items.length, groups.length, options.length, linkCount, stockRows.length].join(':');
   return crypto.createHash('sha256').update(signature).digest('hex').slice(0, 16);
 }

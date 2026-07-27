@@ -85,17 +85,20 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 
 | Method | Path | Permission | Description | Gating flag(s) |
 |---|---|---|---|---|
-| GET | `/menu` | (any authenticated role) | Full active menu tree in one call — the endpoint the POS caches at login. Returns `menu_version`/ETag. | — |
+| GET | `/menu` | (any authenticated role) | Full active menu tree in one call — the endpoint the POS caches at login. Returns `menu_version`/ETag. Each item carries `isOrderable`/`stockRemaining` (Phase 2, session 2e — see below). | — |
 | GET | `/menu/categories` | (any authenticated role) | List categories, paginated. | — |
 | POST | `/menu/categories` | `menu.write` | Create a category. `default_destination` validated against `venue_type`; `default_course_number` requires `courses_enabled`. | `venue_type`, `courses_enabled` |
 | PATCH | `/menu/categories/{id}` | `menu.write` | Update a category. | `venue_type`, `courses_enabled` |
 | DELETE | `/menu/categories/{id}` | `menu.write` | Soft-delete — 409 if it has active items. | — |
-| GET | `/menu/items` | (any authenticated role) | List items, filterable by `category_id`/`is_available`/`search`, paginated. | — |
+| GET | `/menu/items` | (any authenticated role) | List items, filterable by `category_id`/`is_available`/`search`, paginated. Each item carries `isOrderable`/`stockRemaining`. | — |
 | POST | `/menu/items` | `menu.write` | Create an item — `destination`/`course_number` inherit from the category unless overridden. | `venue_type`, `courses_enabled` |
 | GET | `/menu/items/{id}` | (any authenticated role) | Get an item. | — |
 | PATCH | `/menu/items/{id}` | `menu.write` | Update an item. | `venue_type`, `courses_enabled` |
 | DELETE | `/menu/items/{id}` | `menu.write` | Soft-delete. | — |
-| PATCH | `/menu/items/{id}/availability` | `menu.eightysix` (S) | The "86" toggle. | `eightysix_requires_manager` |
+| PATCH | `/menu/items/{id}/availability` | `menu.eightysix` (S) | The Phase 1 manual, non-dated "86" toggle (`menu_items.is_available`). | `eightysix_requires_manager` |
+| POST | `/menu/items/{id}/86` | `menu.eightysix` (S) | Phase 2, session 2e — the dated, service-level 86 (`menu_item_stock.is_86ed` for today), distinct from the toggle above. `{reason?}`. Creates today's stock row if none exists yet. | `eightysix_requires_manager` |
+| POST | `/menu/items/{id}/restore` | `menu.eightysix` (S) | Un-86 for today. Idempotent — a no-op success if not currently 86'd. | `eightysix_requires_manager` |
+| PATCH | `/menu/items/{id}/stock` | `menu.stock` | `{starting_quantity}` (create-or-reset today's row, reason `manual_adjust`) or `{delta}` (adjust an existing row, reason `restock` if positive else `manual_adjust`). 422 `ITEM_NOT_STOCK_TRACKED` for `delta` with no existing row. | `stock_tracking_mode` |
 | GET | `/menu/items/{id}/modifier-groups` | (any authenticated role) | Resolved groups + options + defaults attached to this item, in attachment sort order. | — |
 | POST | `/menu/items/{id}/modifier-groups` | `menu.write` | Replace the full set of modifier groups attached to this item. 422 `MODIFIER_GROUP_LIMIT_EXCEEDED` past `modifier_max_groups_per_item`. | `modifier_max_groups_per_item` |
 | GET | `/menu/modifier-groups` | (any authenticated role) | List groups with their options, paginated. `?include_inactive=true` also returns `is_active=false` groups (soft-deleted groups are never returned). | `modifiers_enabled` (informational — not enforced server-side) |
@@ -107,6 +110,18 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | POST | `/menu/modifier-groups/{id}/options` | `menu.write` | Add an option — `is_default`/`stock_tracked`/`tier_prices` accepted (Phase 2). `tier_prices` only accepted when the group's `pricing_mode='tiered'`. | — |
 | PATCH | `/menu/modifier-options/{id}` | `menu.write` | Update an option. | — |
 | DELETE | `/menu/modifier-options/{id}` | `menu.write` | Soft-delete. | — |
+
+## Menu — stock (Phase 2, session 2e)
+
+`is_orderable` = `is_active AND is_available AND NOT is_86ed AND (mode='none' OR current_quantity > 0 OR allow_negative_stock)`, computed once in `src/modules/menu/stockService.ts` and applied on every item response — no client recomputes it. `stock_remaining` is `null` when the item has never been stock-tracked (mode `'none'` or no row at all). The order-time decrement is atomic (a single conditional `UPDATE ... WHERE current_quantity >= $qty ... RETURNING`, never a read-then-write) — see `docs/phase2/SESSION-2e.md` for why that matters. Two routes below (`bulk-set` payload shape, `day-open` semantics) had no example/spec text to follow and are flagged there as best-effort.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/menu/stock` | `menu.view` | Stock rows for `?business_date` (default today). No permission was named for this route in the session spec — gated the same as other menu reads. |
+| GET | `/menu/stock/movements` | `reports.view` | Paginated `stock_movements`, filterable by `?menu_item_id&from&to`. |
+| GET | `/menu/stock/low` | `menu.view` | Today's rows at or below `stock_warn_threshold`. |
+| POST | `/menu/stock/bulk-set` | `menu.stock` | `{items: [{menu_item_id, starting_quantity}]}` — best-effort payload shape, see `docs/phase2/SESSION-2e.md`. |
+| POST | `/menu/stock/day-open` | `menu.stock` | `{business_date?}`, idempotent. Only carries forward items that have ever had a stock row before, seeded from each one's most recent `starting_quantity` — never invents a quantity for a never-tracked item. `is_86ed` resets unless `eightysix_resets_daily=false`. |
 
 ## Orders — core
 

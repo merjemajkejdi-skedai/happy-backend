@@ -108,6 +108,8 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `MODIFIER_OPTION_NOT_IN_GROUP` | 422 | A selected option's group isn't attached to this item. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
 | `MODIFIER_DUPLICATE_SELECTION` | 422 | The same modifier option id appears more than once in one request. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
 | `MODIFIER_DESTINATION_MISMATCH` | 422 | A selected option's group has an `applies_to_destination` that doesn't match this item's destination. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
+| `INSUFFICIENT_STOCK` | 409 | `POST /orders/:id/items` for a stock-tracked item with fewer than `quantity` remaining and `allow_negative_stock=false`. The atomic decrement itself — not a pre-check — is what raises this. Phase 2, session 2e. |
+| `ITEM_NOT_STOCK_TRACKED` | 422 | `PATCH /menu/items/:id/stock {delta}` on an item with no existing stock row for today — there's no baseline to adjust; use `{starting_quantity}` first. Phase 2, session 2e. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |

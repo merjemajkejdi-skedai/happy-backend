@@ -4,9 +4,22 @@ import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as itemsService from './itemsService';
 import * as modifiersService from './modifiersService';
+import * as stockService from './stockService';
+import { getVenueContext } from './validation';
 import { serializeMenuItem, serializeModifierOption } from './serializers';
+import type { MenuItem } from '../../generated/prisma/client';
 
 export const itemsRouter = Router();
+
+// Single-item routes each need one extra stock lookup — cheap, and correct
+// beats reusing a bare serializeMenuItem call with no stock context (session
+// 2e: is_orderable/stock_remaining are supposed to be on every item
+// response, not just the list view).
+async function serializeWithStock(venueId: string, item: MenuItem) {
+  const context = await getVenueContext(venueId);
+  const stockByItem = await stockService.getTodayStockByItem(venueId, context.timezone, [item.id]);
+  return serializeMenuItem(item, stockByItem.get(item.id) ?? null, context.allowNegativeStock);
+}
 
 itemsRouter.get('/', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const { category_id, is_available, search } = req.query as Record<string, string>;
@@ -18,7 +31,13 @@ itemsRouter.get('/', requirePermission('menu.view'), async (req: Request, res: R
     page,
     perPage,
   });
-  sendData(res, result.items.map(serializeMenuItem), buildPaginationMeta(result.page, result.perPage, result.total));
+  const context = await getVenueContext(req.auth!.venueId);
+  const stockByItem = await stockService.getTodayStockByItem(req.auth!.venueId, context.timezone, result.items.map(i => i.id));
+  sendData(
+    res,
+    result.items.map(item => serializeMenuItem(item, stockByItem.get(item.id) ?? null, context.allowNegativeStock)),
+    buildPaginationMeta(result.page, result.perPage, result.total),
+  );
 });
 
 itemsRouter.post('/', requirePermission('menu.write'), async (req: Request, res: Response) => {
@@ -47,13 +66,13 @@ itemsRouter.post('/', requirePermission('menu.write'), async (req: Request, res:
     taxRatePercent: tax_rate_percent,
   });
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, serializeMenuItem(result.value));
+  sendData(res, await serializeWithStock(req.auth!.venueId, result.value));
 });
 
 itemsRouter.get('/:id', requirePermission('menu.view'), async (req: Request, res: Response) => {
   const item = await itemsService.getItem(req.auth!.venueId, req.params.id);
   if (!item) return sendError(res, 'NOT_FOUND', 'Item not found');
-  sendData(res, serializeMenuItem(item));
+  sendData(res, await serializeWithStock(req.auth!.venueId, item));
 });
 
 itemsRouter.patch('/:id', requirePermission('menu.write'), async (req: Request, res: Response) => {
@@ -77,7 +96,7 @@ itemsRouter.patch('/:id', requirePermission('menu.write'), async (req: Request, 
     taxRatePercent: tax_rate_percent,
   });
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, serializeMenuItem(result.value));
+  sendData(res, await serializeWithStock(req.auth!.venueId, result.value));
 });
 
 itemsRouter.delete('/:id', requirePermission('menu.write'), async (req: Request, res: Response) => {
@@ -91,7 +110,36 @@ itemsRouter.patch('/:id/availability', requireResolvedPermission('menu.eightysix
   if (typeof is_available !== 'boolean') return sendError(res, 'VALIDATION_ERROR', 'is_available (boolean) is required');
   const result = await itemsService.setItemAvailability(req.auth!.venueId, req.params.id, is_available);
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, serializeMenuItem(result.value));
+  sendData(res, await serializeWithStock(req.auth!.venueId, result.value));
+});
+
+// ── Stock & 86 (Phase 2, session 2e) — dated, service-level, distinct from
+// the Phase 1 is_available toggle above. ─────────────────────────────────────
+
+itemsRouter.post('/:id/86', requireResolvedPermission('menu.eightysix'), async (req: Request, res: Response) => {
+  const { reason } = req.body ?? {};
+  const context = await getVenueContext(req.auth!.venueId);
+  const result = await stockService.eightysixItem(req.auth!.venueId, context.timezone, req.params.id, req.auth!.userId, reason ?? null);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, result.value);
+});
+
+itemsRouter.post('/:id/restore', requireResolvedPermission('menu.eightysix'), async (req: Request, res: Response) => {
+  const context = await getVenueContext(req.auth!.venueId);
+  const result = await stockService.restoreItem(req.auth!.venueId, context.timezone, req.params.id);
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, result.value);
+});
+
+itemsRouter.patch('/:id/stock', requirePermission('menu.stock'), async (req: Request, res: Response) => {
+  const { starting_quantity, delta } = req.body ?? {};
+  const context = await getVenueContext(req.auth!.venueId);
+  const result = await stockService.patchItemStock(req.auth!.venueId, context.timezone, req.params.id, req.auth!.userId, {
+    startingQuantity: starting_quantity,
+    delta,
+  });
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  sendData(res, result.value);
 });
 
 itemsRouter.get('/:id/modifier-groups', requirePermission('menu.view'), async (req: Request, res: Response) => {

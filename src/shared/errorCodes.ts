@@ -113,6 +113,10 @@ export const ERROR_CODES = [
   'VOID_ALREADY_RESOLVED',
   'VOID_ALREADY_PENDING',
 
+  // ── Menu — stock & 86 (Phase 2, session 2e) ──────────────────────────────
+  'INSUFFICIENT_STOCK',
+  'ITEM_NOT_STOCK_TRACKED',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',
