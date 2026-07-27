@@ -12,9 +12,7 @@ import {
   type Destination,
   type RestaurantSettings,
   type OrderStatus,
-  type UserRole,
 } from '../../generated/prisma/client';
-import { canVoidAfterSend } from '../../shared/permissions';
 
 export type OrderItemResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
 
@@ -390,61 +388,6 @@ export async function setItemModifiers(
   return { ok: true, value: updated };
 }
 
-// ── Void ─────────────────────────────────────────────────────────────────────
-
-export interface VoidItemInput {
-  reason?: string | null;
-}
-
-export async function voidItem(
-  venueId: string,
-  actorUserId: string,
-  actorRole: UserRole,
-  orderId: string,
-  itemId: string,
-  input: VoidItemInput,
-): Promise<OrderItemResult<null>> {
-  const order = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
-  if (!order) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
-
-  const item = await scopedPrisma.orderItem.findFirst({ where: { id: itemId, orderId, venueId } });
-  if (!item) return { ok: false, error: err(404, 'NOT_FOUND', 'Order item not found') };
-
-  if (item.status === 'cancelled') {
-    return { ok: false, error: err(409, 'ITEM_ALREADY_CANCELLED', 'This item has already been voided') };
-  }
-
-  const { settings } = await getVenueAndSettings(venueId);
-
-  if (item.status !== 'pending') {
-    if (!settings.allowItemVoidAfterSend || !canVoidAfterSend(actorRole, settings)) {
-      return { ok: false, error: err(403, 'VOID_AFTER_SEND_NOT_ALLOWED', 'Voiding an item after it has been sent is not allowed') };
-    }
-  }
-
-  if (settings.voidReasonRequired && !input.reason?.trim()) {
-    return { ok: false, error: err(422, 'VOID_REASON_REQUIRED', 'A reason is required to void this item') };
-  }
-
-  await scopedPrisma.$transaction(async tx => {
-    await tx.orderItem.update({
-      where: { id: itemId },
-      data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: input.reason ?? null, voidByUserId: actorUserId },
-    });
-
-    await tx.orderEvent.create({
-      data: {
-        venueId,
-        orderId,
-        orderItemId: itemId,
-        eventType: 'item.voided',
-        actorUserId,
-        payload: { reason: input.reason ?? null, previousStatus: item.status },
-      },
-    });
-
-    await recomputeOrder(tx, venueId, orderId);
-  });
-
-  return { ok: true, value: null };
-}
+// Void handling moved to voidService.ts (Phase 2, session 2d-i) — see
+// requestVoid/approveVoid/rejectVoid there. The old flat allow-after-send
+// gate this function used to enforce no longer exists in the new flow.

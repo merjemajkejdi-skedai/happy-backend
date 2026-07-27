@@ -119,7 +119,7 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | POST | `/orders/{id}/items` | `order.create` | Add an item — snapshots the menu at insert time so later menu edits never touch this order. `price_delta_snapshot` for each modifier is resolved via `resolveModifierPrice` (free/fixed/tiered), never the raw stored `price_delta`. `Idempotency-Key` aware. | `allow_free_text_notes`, `courses_enabled`, `require_modifier_validation` |
 | PATCH | `/orders/{id}/items/{itemId}` | `order.create` | Update quantity/notes/modifiers — only while the item is `pending`. | `allow_free_text_notes`, `require_modifier_validation` |
 | PATCH | `/orders/{id}/items/{itemId}/modifiers` | `order.create` | Replace an item's modifier selections only — only while `pending`, otherwise 409 `ITEM_ALREADY_SENT`. Revalidates and recomputes totals. | `require_modifier_validation` |
-| DELETE | `/orders/{id}/items/{itemId}` | `order.create` (+ `order.void_after_send` once sent) | Void an item — any waiter while pending; admin-only once sent, and only if `allow_item_void_after_send`. | `allow_item_void_after_send`, `require_reason_on_void` |
+| DELETE | `/orders/{id}/items/{itemId}` | `order.void` | **Phase 2, session 2d-i:** legacy void route, now routed through the same request/approve flow as `POST .../void` below — `reason` maps to `reason_text`. Returns 202 (not cancelled yet) if a request is queued, 200 `{deleted:true}` if resolved immediately. | `void_reason_required`, `void_before_send_requires_approval`, `void_requires_approval` |
 
 ## Orders — lifecycle
 
@@ -132,6 +132,19 @@ of session 2a-ii. A `manager` actor may only create/edit `waiter`/`kitchen`/
 | POST | `/orders/{id}/close` | `order.close` | Close an order — blocked while any non-cancelled item is unserved. No payment handling in Phase 1. | — |
 | POST | `/orders/{id}/cancel` | `order.create` (+ `order.cancel_sent` once anything sent) | Cancel an order and all its items. A waiter may only before the first send; admin-only after. `reason` mandatory. | — |
 | GET | `/orders/{id}/events` | `order.events.read` (admin) | Paginated audit trail, newest first, actor names resolved. | — |
+
+## Orders — void request/approval (Phase 2, session 2d-i)
+
+Replaces Phase 1's void behavior entirely (including on the legacy `DELETE /orders/:id/items/:itemId` route above). `resolveVoidPolicy` (`src/modules/orders/voidPolicy.ts`) decides `stage` (`before_send` if the item is still `pending`, else `after_send`), `requires_approval` from the matching settings flag, and `auto_approve` from whether the actor's role satisfies `void_approval_role` (only `manager`/`admin` ever can). A manager never queues for themselves when `void_approval_role='manager'` (the default). Every outcome writes `restaurant_void_log` — see `docs/SCHEMA.md`/`docs/phase2/SCHEMA-ADDITIONS.md`.
+
+| Method | Path | Permission | Description | Gating flag(s) |
+|---|---|---|---|---|
+| POST | `/orders/{id}/items/{itemId}/void` | `order.void` | Request (or, if no approval is needed, immediately execute) a void. `{reason_code, reason_text}` — at least one required when `void_reason_required`. 202 with the void record if queued for approval, 200 if resolved immediately. | `void_reason_required`, `void_before_send_requires_approval`, `void_requires_approval`, `void_approval_role` |
+| GET | `/voids/pending` | `void.approve` | Manager/admin approval queue — paginated `restaurant_void_log` rows with `status='pending_approval'`. | — |
+| POST | `/voids/{id}/approve` | `void.approve` | Cancels the item, sets `void_id`, recomputes order totals, resolves the matching `approval_requests` row. | — |
+| POST | `/voids/{id}/reject` | `void.approve` | `{rejection_reason}` — item stays live and untouched; the void log is still resolved (`status='rejected'`) for reporting. | — |
+| GET | `/voids` | `reports.view` | All void log rows, filterable by `?from&to` (business_date), `?status`, `?user_id`, paginated. | — |
+| GET | `/voids/{id}` | `reports.view` | A single void log row. | — |
 
 ## Orders — course firing (Phase 2, session 2c)
 

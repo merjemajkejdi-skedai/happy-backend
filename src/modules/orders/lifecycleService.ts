@@ -2,6 +2,7 @@ import { scopedPrisma } from '../../middleware/venueScope';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { recomputeOrder } from './ordersService';
 import { courseNameFromSettings } from './statusMachine';
+import { hasPendingVoid } from './voidService';
 import { roleHasPermission } from '../../shared/permissions';
 import { Prisma, type Order, type OrderItem, type UserRole } from '../../generated/prisma/client';
 
@@ -231,6 +232,10 @@ export async function closeOrder(venueId: string, actorUserId: string, orderId: 
   if (!order) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
   if (order.status === 'closed' || order.status === 'cancelled') {
     return { ok: false, error: err(409, 'INVALID_STATUS_TRANSITION', `Cannot close an order with status '${order.status}'`) };
+  }
+
+  if (await hasPendingVoid(venueId, orderId)) {
+    return { ok: false, error: err(409, 'ORDER_HAS_PENDING_VOID', 'This order has a void request awaiting approval and cannot be closed yet') };
   }
 
   const items = await scopedPrisma.orderItem.findMany({ where: { orderId, venueId, status: { not: 'cancelled' } } });

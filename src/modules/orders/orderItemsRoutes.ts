@@ -4,6 +4,7 @@ import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { runIdempotent } from '../../lib/idempotency';
 import * as orderItemsService from './orderItemsService';
 import * as lifecycleService from './lifecycleService';
+import * as voidService from './voidService';
 import { serializeOrderItem } from './serializers';
 
 // mergeParams: true — this router is mounted at /orders/:id/items, and needs
@@ -47,21 +48,35 @@ orderItemsRouter.patch('/:itemId/modifiers', requirePermission('order.create'), 
   sendData(res, serializeOrderItem(result.value));
 });
 
-// Void. Permission split lives in the service (voidItem): status 'pending'
-// only needs order.create (this route's own gate); anything past 'pending'
-// additionally needs order.void_after_send, checked against the flag.
-orderItemsRouter.delete('/:itemId', requirePermission('order.create'), async (req: Request, res: Response) => {
+// Void (Phase 2, session 2d-i). Both this legacy route and the canonical
+// POST .../void below go through the same requestVoid flow — see
+// voidService.ts. `reason` (Phase 1's only field) maps to `reason_text`.
+// Response is 202 with the void id while a request is queued for approval,
+// 200 {deleted:true} once the item is actually cancelled (immediately, or
+// later via POST /voids/:id/approve).
+orderItemsRouter.delete('/:itemId', requirePermission('order.void'), async (req: Request, res: Response) => {
   const { reason } = req.body ?? {};
-  const result = await orderItemsService.voidItem(
-    req.auth!.venueId,
-    req.auth!.userId,
-    req.auth!.role,
-    req.params.id,
-    req.params.itemId,
-    { reason },
-  );
+  const result = await voidService.requestVoid(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, req.params.itemId, {
+    reasonText: reason,
+  });
   if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, { deleted: true });
+  if (result.value.pending) {
+    return res.status(202).json({ data: { deleted: false, pending: true, void_id: result.value.voidLog.id }, meta: {} });
+  }
+  sendData(res, { deleted: true, void_id: result.value.voidLog.id });
+});
+
+orderItemsRouter.post('/:itemId/void', requirePermission('order.void'), async (req: Request, res: Response) => {
+  const { reason_code, reason_text } = req.body ?? {};
+  const result = await voidService.requestVoid(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, req.params.itemId, {
+    reasonCode: reason_code,
+    reasonText: reason_text,
+  });
+  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+  if (result.value.pending) {
+    return res.status(202).json({ data: { pending: true, void: result.value.voidLog }, meta: {} });
+  }
+  sendData(res, { pending: false, void: result.value.voidLog });
 });
 
 orderItemsRouter.patch('/:itemId/serve', requirePermission('order.serve'), async (req: Request, res: Response) => {

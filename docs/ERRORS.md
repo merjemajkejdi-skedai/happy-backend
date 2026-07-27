@@ -111,8 +111,21 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |
-| `VOID_AFTER_SEND_NOT_ALLOWED` | 403 | Voiding a non-pending item without `allow_item_void_after_send` AND `order.void_after_send` permission. |
-| `VOID_REASON_REQUIRED` | 422 | Voiding without a reason while `require_reason_on_void=true`. |
+| `VOID_REASON_REQUIRED` | 422 | Voiding without a reason while `void_reason_required=true`. |
+
+`VOID_AFTER_SEND_NOT_ALLOWED` (Phase 1) no longer fires — session 2d-i replaced the flat `allow_item_void_after_send` block with the request/approve/reject flow below, where an after-send void is never flatly rejected, only queued for approval or auto-approved. The code stays in `ErrorCode` for wire-compatibility with anything that still matches on it, but nothing in this codebase emits it anymore.
+
+## Orders — void request/approval (`/orders/:id/items/:itemId/void`, `/voids/*`) — Phase 2, session 2d-i
+
+Replaces Phase 1's void behavior entirely, including on the legacy `DELETE /orders/:id/items/:itemId` route, which now routes through the same flow. See `resolveVoidPolicy` in `src/modules/orders/voidPolicy.ts` for the before_send/after_send + approval-required + auto-approve decision, and `docs/phase2/SESSION-2d-i.md` for the full design.
+
+| Code | Status | Fires when |
+|---|---|---|
+| `VOID_REASON_REQUIRED` | 422 | (see above — same code, same meaning, now checked by the new flow) |
+| `ITEM_ALREADY_CANCELLED` | 409 | (see above — unchanged) |
+| `VOID_ALREADY_PENDING` | 409 | A second void request is submitted for an item that already has one awaiting approval. |
+| `VOID_ALREADY_RESOLVED` | 409 | `POST /voids/:id/approve` or `/reject` on a void request that isn't `pending_approval` anymore. |
+| `ORDER_HAS_PENDING_VOID` | 409 | `POST /orders/:id/close` while any of its items has a void request awaiting approval. |
 
 ## Orders — lifecycle (`/orders/:id/send`, `/transfer`, `/serve`, `/close`, `/cancel`)
 

@@ -108,6 +108,11 @@ export const ERROR_CODES = [
   'PREVIOUS_COURSE_NOT_SERVED',
   'COURSE_ALREADY_STARTED',
 
+  // ── Orders — void request/approval (Phase 2, session 2d-i) ───────────────
+  'ORDER_HAS_PENDING_VOID',
+  'VOID_ALREADY_RESOLVED',
+  'VOID_ALREADY_PENDING',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',

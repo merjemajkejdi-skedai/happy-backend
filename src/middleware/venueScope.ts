@@ -16,6 +16,10 @@ const VENUE_SCOPED_MODELS = new Set([
   // added in session 2a-i — found while building session 2c's course-firing
   // routes, the first code to query it directly by venue.
   'OrderCourse',
+  // Same story, found while building session 2d-i's void flow — both have
+  // their own venue_id column but were never added to this set when created
+  // in 2a-i.
+  'RestaurantVoidLog', 'ApprovalRequest',
 ]);
 
 // Operations that scan or bulk-touch rows — this is where "forgot to filter
