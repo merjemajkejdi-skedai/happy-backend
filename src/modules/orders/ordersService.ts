@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma';
 import { computeDisplayLabel } from '../tables/service';
 import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { allocateNumbers, formatTicketNumber } from './ticketNumbering';
+import { computeBusinessDate as computeShiftBusinessDate } from '../shifts/businessDate';
 import { deriveOrderStatus, deriveCourseStatus, courseNameFromSettings, type ExplicitOrderFlag } from './statusMachine';
 import {
   Prisma,
@@ -189,6 +190,16 @@ export async function createOrder(
       );
       const ticketNumber = needsTicket ? formatTicketNumber(settings.ticketNumberPrefix, ticketCounterValue!) : null;
 
+      // Phase 2, session 2g-ii. business_date is set unconditionally — it's
+      // a standalone "what calendar day did this happen on" fact, useful
+      // for reporting whether or not shift tracking is even on. shift_id
+      // only attaches when shifts_enabled is true AND a shift happens to be
+      // open right now; with no open shift, order creation still succeeds
+      // with shift_id null — "never block service because someone forgot
+      // to open a shift" (2g-ii.md section 3).
+      const businessDate = computeShiftBusinessDate(new Date(), venue.timezone, settings.businessDayStartHour);
+      const openShift = settings.shiftsEnabled ? await tx.shift.findFirst({ where: { venueId, status: 'open' } }) : null;
+
       const created = await tx.order.create({
         data: {
           venueId,
@@ -201,6 +212,8 @@ export async function createOrder(
           notes: input.notes ?? null,
           status: 'draft',
           openedByUserId: actorUserId,
+          businessDate,
+          shiftId: openShift?.id ?? null,
         },
       });
 

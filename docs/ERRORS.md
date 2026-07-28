@@ -124,6 +124,8 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `PARTIAL_PAYMENT_NOT_ALLOWED` | 422 | `POST /orders/:id/payments` with `amount < amount_due` while `allow_partial_payment=false`. Phase 2, session 2g-i. |
 | `PAYMENT_ALREADY_VOIDED` | 409 | `DELETE /orders/:id/payments/:pid` on a payment that already has `is_voided=true`. Phase 2, session 2g-i. |
 | `ORDER_NOT_SETTLED` | 409 | `POST /orders/:id/close` while `require_payment_to_close=true` and `amount_due > 0`. Checked after `ORDER_HAS_PENDING_VOID`/`ORDER_HAS_UNSERVED_ITEMS`. Phase 2, session 2g-i. |
+| `SHIFT_ALREADY_OPEN` | 409 | `POST /shifts/open` while a shift is already open for this venue — the `shifts_venue_id_open_key` partial unique index is the actual enforcement, this is its P2002 translated to a domain error. Phase 2, session 2g-ii. |
+| `SHIFT_HAS_OPEN_ORDERS` | 409 | `POST /shifts/close` while a non-terminal order is still attached to the open shift, without `?force=true`. `error.details.open_orders` lists `{id, order_number}` for each. Phase 2, session 2g-ii. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |

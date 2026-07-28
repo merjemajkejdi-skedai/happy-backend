@@ -139,6 +139,10 @@ export const ERROR_CODES = [
   'PAYMENT_ALREADY_VOIDED',
   'ORDER_NOT_SETTLED',
 
+  // ── Shifts (Phase 2, session 2g-ii) ───────────────────────────────────────
+  'SHIFT_ALREADY_OPEN',
+  'SHIFT_HAS_OPEN_ORDERS',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',
