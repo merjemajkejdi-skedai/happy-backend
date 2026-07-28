@@ -225,7 +225,7 @@ Mounted at `/api/v1/shifts`, not nested under `/orders` — a shift isn't scoped
 
 One open shift per venue, enforced by the partial unique index from 2a-i (`shifts_venue_id_open_key`) — a second `POST /shifts/open` while one is already open returns 409 `SHIFT_ALREADY_OPEN`. New orders attach `shift_id` to the currently open shift only when `shifts_enabled=true` **and** a shift happens to be open; with neither, order creation still succeeds with `shift_id` null (never block service for a forgotten shift).
 
-`POST /shifts/close` blocked by 409 `SHIFT_HAS_OPEN_ORDERS` (body `error.details.open_orders: [{id, order_number}]`) while any non-terminal order is still attached to this shift, unless `?force=true`. Forcing does **not** immediately reassign those orders — they keep pointing at the now-closed shift until the *next* `POST /shifts/open`, which sweeps in every still-active order not attached to an open shift (this literally includes the force-closed shift's leftover orders, but also any order that was never attached to a shift at all, e.g. opened while `shifts_enabled` was off) and reassigns them to the new shift, logging one `order.shift_reassigned` event per order. `cash_variance = closing_cash_counted - (opening_float + cash payments in the shift)` — negative means short, stored exactly as computed, never suppressed or clamped. Closing also writes a `shift_reports` row (`is_final=true`, `period_start`/`period_end` = the shift's open/close timestamps, `payload` a placeholder — session 2h-i defines the real contents).
+`POST /shifts/close` blocked by 409 `SHIFT_HAS_OPEN_ORDERS` (body `error.details.open_orders: [{id, order_number}]`) while any non-terminal order is still attached to this shift, unless `?force=true`. Forcing does **not** immediately reassign those orders — they keep pointing at the now-closed shift until the *next* `POST /shifts/open`, which sweeps in every still-active order not attached to an open shift (this literally includes the force-closed shift's leftover orders, but also any order that was never attached to a shift at all, e.g. opened while `shifts_enabled` was off) and reassigns them to the new shift, logging one `order.shift_reassigned` event per order. `cash_variance = closing_cash_counted - (opening_float + cash payments in the shift)` — negative means short, stored exactly as computed, never suppressed or clamped. Closing also writes a `shift_reports` row (`is_final=true`, `period_start`/`period_end` = the shift's open/close timestamps, `payload` the full report computed by session 2h-i's `computeReport` — see the Reports section below).
 
 `GET /shifts/current` never auto-closes a long-running shift — it only sets `flagged: true` once the shift has been open longer than `shift_auto_close_hours` (default 24), so a manager notices without losing cash reconciliation to a silent auto-close.
 
@@ -238,6 +238,31 @@ One open shift per venue, enforced by the partial unique index from 2a-i (`shift
 | GET | `/shifts/:id` | `reports.view` | A single shift. |
 
 The three `GET` routes aren't assigned a permission by the session spec (only the two `POST` routes name `shift.manage`) — gated with `reports.view` as the closest existing fit, matching how `voidsRouter` already gates its own read-only list/get routes.
+
+## Reports (Phase 2, session 2h-i)
+
+Mounted at `/api/v1/reports`. One function, `computeReport(venueId, periodStart, periodEnd, shiftId?)` (`src/modules/reports/reportService.ts`), computes the entire payload shape defined in `docs/phase2/REPORT-PAYLOAD.md`; every route below is a straight projection of it — none run their own query set. `shiftId` is a documented extension beyond the session spec's literal 3-arg signature: two shifts can share one business date, so business-date filtering alone can't narrow to a single shift the way `shift_id` (a real column on `orders`/`payments`/`restaurant_void_log` since 2g-i/2g-ii) can.
+
+**Scope resolution.** Every route except `/shift/:id` accepts either `?shift_id=` (exact shift) or `?from&to` (business dates, `YYYY-MM-DD`, both default to the venue's current business date when omitted — a bare request reports on "today"). `?from&to` are converted to real instants via `businessDateWindowStart` (`src/modules/shifts/businessDate.ts`) — the inverse of `computeBusinessDate`: the actual moment `business_day_start_hour` local time begins on that calendar date, correctly across a DST transition.
+
+**Revenue exclusion (equal split).** Equal-split children are excluded wholesale from `revenue`/`orders`-average/`covers` figures — the parent's own totals were never touched by an equal split, so including a child's share alongside the parent's full total would double it. `by_item`/`by_seat` children stay in; their items genuinely moved, so parent + children sum to the original with no overlap. `top_items`/`destinations` apply the item-level half of this same rule instead (`menu_item_id IS NULL` is exactly the equal-split synthetic item marker) — items live on exactly one order regardless of split type, so no double-count risk there either way. `payments`/`unsettled_value` are **not** filtered this way — a payment or an owed balance on a split child is real money tied to that specific check, not a duplicate of the parent's.
+
+**Attribution.** Waiter figures (orders, covers, sales, voids, tips) all follow the order's `opened_by_user_id` — voids (who requested it) and payments (who took it) each have their own separate dimension elsewhere (`voids.by_user`), but a waiter's *own* breakdown always means "activity on tables this waiter opened."
+
+**Snapshot discipline.** Every figure derives from snapshot columns (`item_name_snapshot`, `unit_price_snapshot`, `line_total`, `void_value`, …) — never a join to `menu_items`, `menu_categories`, or `modifier_options`. A menu price change today cannot change a prior period's numbers, stored or freshly recomputed.
+
+**Materialization.** A `shift_reports` row with `is_final=true` is served exactly as stored, never recomputed — `GET /reports/shift/:id` checks for one first and only falls back to a live (unstored) `computeReport` call for a still-open shift with no final report yet. `POST /reports/generate` always computes fresh and writes a new final row.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/reports/shift/{id}` | `reports.view` | The stored final report if one exists, else a live preview. |
+| GET | `/reports/range` | `reports.view` | `?from&to&group_by=day\|shift\|waiter`. No `group_by`: one report for the whole range. `waiter`: `report.waiters` for the range. `day`/`shift`: an array of `{business_date, report}` / `{shift_id, report}`, one `computeReport` call per bucket. |
+| GET | `/reports/sales` | `reports.view` | `{revenue, orders, covers}` for the resolved scope. |
+| GET | `/reports/waiters` | `reports.view` | `report.waiters` for the resolved scope. |
+| GET | `/reports/voids` | `reports.view` | `report.voids` for the resolved scope. |
+| GET | `/reports/items` | `reports.view` | `?limit&sort=quantity\|revenue` (default 20, `revenue`) — re-sorts `report.top_items`. |
+| GET | `/reports/payments` | `reports.view` | `report.payments` for the resolved scope. |
+| POST | `/reports/generate` | `reports.view` | Same scope resolution as the GET routes, via query `shift_id` or `from`/`to`. Materializes into `shift_reports` (`is_final=true`). Returns `{shift_report_id, report}`. |
 
 ## Orders — course firing (Phase 2, session 2c)
 

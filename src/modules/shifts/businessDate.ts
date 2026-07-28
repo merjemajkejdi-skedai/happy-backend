@@ -33,3 +33,43 @@ export function computeBusinessDate(timestamp: Date, timezone: string, businessD
   }
   return localDate;
 }
+
+// The inverse of computeBusinessDate: the real UTC instant at which a given
+// business date (a plain "YYYY-MM-DD" calendar date, the same shape
+// business_date columns store) actually begins in the venue's own timezone
+// — i.e. business_day_start_hour local time on that date. Used by
+// session 2h-i's report routes to turn a `?from&to` business-date range
+// into genuine period.start/period.end instants, per REPORT-PAYLOAD.md's
+// example (a business date's window runs from its own start hour through
+// one second before the next date's start hour).
+//
+// Two-pass correction rather than a timezone library: treat the desired
+// wall-clock time as if it were UTC (a guess), check what wall-clock time
+// that guess actually renders as in the target timezone, and shift by the
+// difference. One pass is enough outside a DST transition; a second pass
+// makes it exact even when the first guess landed right on one (the
+// tz-rendered hour on the corrected guess is re-checked, not assumed).
+export function businessDateWindowStart(businessDate: string, timezone: string, businessDayStartHour: number): Date {
+  const [year, month, day] = businessDate.split('-').map(Number);
+  const desired = Date.UTC(year, month - 1, day, businessDayStartHour, 0, 0);
+  let guess = new Date(desired);
+
+  for (let i = 0; i < 2; i++) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(guess);
+    const get = (type: string) => Number(parts.find(p => p.type === type)!.value);
+    const renderedHour = get('hour') === 24 ? 0 : get('hour');
+    const renderedAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), renderedHour, get('minute'), get('second'));
+    guess = new Date(guess.getTime() + (desired - renderedAsUtc));
+  }
+
+  return guess;
+}

@@ -1,6 +1,7 @@
 import { scopedPrisma } from '../../middleware/venueScope';
 import { err, getVenueAndSettings, type ShiftDomainError } from './validation';
 import { computeBusinessDate } from './businessDate';
+import { generateReport } from '../reports/reportService';
 import { Prisma, type Shift } from '../../generated/prisma/client';
 
 export type ShiftResult<T> = { ok: true; value: T } | { ok: false; error: ShiftDomainError };
@@ -115,7 +116,7 @@ export async function closeShift(venueId: string, actorUserId: string, input: Cl
     const expectedCash = shift.openingFloat.plus(cashInShift);
     const cashVariance = closingCashCounted != null ? closingCashCounted.minus(expectedCash) : null;
 
-    const closed = await tx.shift.update({
+    return tx.shift.update({
       where: { id: shift.id },
       data: {
         status: 'closed',
@@ -126,24 +127,15 @@ export async function closeShift(venueId: string, actorUserId: string, input: Cl
         notes: input.notes ?? null,
       },
     });
-
-    // 2g-ii.md section 4 — a stub. Session 2h-i fills in the real payload;
-    // this just records that a report was generated, for what period, and
-    // marks it final.
-    await tx.shiftReport.create({
-      data: {
-        venueId,
-        shiftId: closed.id,
-        periodStart: shift.openedAt,
-        periodEnd: closedAt,
-        generatedByUserId: actorUserId,
-        payload: { generator: '2g-ii-stub', note: 'Payload populated by session 2h-i' },
-        isFinal: true,
-      },
-    });
-
-    return closed;
   });
+
+  // A real, separately-committed operation, run only after the close itself
+  // has landed — computeReport reads the shift's own closed_at/status
+  // (via reportService.getShiftReport's normal path elsewhere) or, as
+  // here, is given periodEnd directly rather than re-reading a value that
+  // wasn't committed yet at call time. Phase 2, session 2h-i replaces what
+  // was a stub write here through 2g-ii.
+  await generateReport(venueId, actorUserId, updated.openedAt, updated.closedAt!, updated.id);
 
   return { ok: true, value: updated };
 }

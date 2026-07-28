@@ -630,6 +630,12 @@ model Order {
   // session 2a-i to exclude split-bill child orders — see
   // docs/phase2/SCHEMA-ADDITIONS.md.
   @@unique([venueId, orderNumber])
+  // Phase 2, session 2h-i — reports filter by business_date (never
+  // created_at) and shift reports narrow further by shift_id; neither had a
+  // supporting index before this session, since nothing queried Order by
+  // either column at scale until now.
+  @@index([venueId, businessDate])
+  @@index([venueId, shiftId])
   @@map("orders")
 }
 
@@ -969,6 +975,10 @@ model Payment {
 
   @@index([venueId, businessDate, method])
   @@index([orderId])
+  // Phase 2, session 2h-i — shift-scoped reports filter payments by
+  // shift_id directly (more precise than business_date alone, since two
+  // shifts can share one business day).
+  @@index([venueId, shiftId])
   @@map("payments")
 }
 

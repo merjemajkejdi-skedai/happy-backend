@@ -1,7 +1,8 @@
 import { scopedPrisma } from '../../middleware/venueScope';
 import { prisma } from '../../db/prisma';
 import { computeDisplayLabel } from '../tables/service';
-import { err, getVenueAndSettings, computeBusinessDate, type OrderDomainError } from './validation';
+import { err, getVenueAndSettings, type OrderDomainError } from './validation';
+import { computeBusinessDate } from '../shifts/businessDate';
 import { recomputeOrder } from './ordersService';
 import { resolveVoidPolicy } from './voidPolicy';
 import { restoreStockForVoid } from '../menu/stockService';
@@ -69,7 +70,14 @@ export async function requestVoid(
   if (!requestedByUser) throw new Error(`user ${actorUserId} missing`);
 
   const requestedByName = requestedByUser.fullName;
-  const businessDate = computeBusinessDate(venue.timezone, settings.ticketNumberReset);
+  // Phase 2, session 2h-i — was previously computed via orders/validation.ts's
+  // ticket_number_reset-based computeBusinessDate (wrong concept entirely,
+  // and outright broken for ticket_number_reset='never', which pins every
+  // void log row to the 1970-01-01 sentinel date). Reports filter void log
+  // rows by business_date, so this now uses the same venue-timezone- and
+  // business_day_start_hour-aware function orders/payments/shifts already
+  // use, keeping a void's business_date consistent with its own order's.
+  const businessDate = computeBusinessDate(new Date(), venue.timezone, settings.businessDayStartHour);
   const voidValue = item.unitPriceSnapshot.plus(item.modifiersTotal).times(item.quantity);
   const tableLabelSnapshot = table ? computeDisplayLabel(settings.tableNamingMode, table.tableNumber, table.tableName) : null;
 
