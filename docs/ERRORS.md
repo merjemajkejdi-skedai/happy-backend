@@ -110,9 +110,12 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `MODIFIER_DESTINATION_MISMATCH` | 422 | A selected option's group has an `applies_to_destination` that doesn't match this item's destination. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
 | `INSUFFICIENT_STOCK` | 409 | `POST /orders/:id/items` for a stock-tracked item with fewer than `quantity` remaining and `allow_negative_stock=false`. The atomic decrement itself — not a pre-check — is what raises this. Phase 2, session 2e. |
 | `ITEM_NOT_STOCK_TRACKED` | 422 | `PATCH /menu/items/:id/stock {delta}` on an item with no existing stock row for today — there's no baseline to adjust; use `{starting_quantity}` first. Phase 2, session 2e. |
-| `SPLIT_MODE_DISABLED` | 403 | `POST /orders/:id/split` while `split_bill_enabled=false` or `split_equal_enabled=false`. Phase 2, session 2f-i. |
-| `SPLIT_WAYS_INVALID` | 422 | `POST /orders/:id/split` with `ways` outside `[2, split_max_ways]`. Phase 2, session 2f-i. |
+| `SPLIT_MODE_DISABLED` | 403 | `POST /orders/:id/split`: `split_type='equal'` while `split_bill_enabled=false` or `split_equal_enabled=false` (2f-i); `split_type='by_item'`/`'by_seat'` while `split_bill_enabled=false` or `split_by_item_enabled=false` (2f-ii). |
+| `SPLIT_WAYS_INVALID` | 422 | `POST /orders/:id/split`: `split_type='equal'` with `ways` outside `[2, split_max_ways]` (2f-i); `split_type='by_item'` with an allocation count outside `[1, split_max_ways]`, or `split_type='by_seat'` with more distinct seats than `split_max_ways` (2f-ii). |
 | `ORDER_ALREADY_PAID` | 409 | `POST /orders/:id/split` on an order with `amount_paid > 0`, or `POST /orders/:id/splits/:childId/merge-back` on a child that's already been paid. Phase 2, session 2f-i. |
+| `SPLIT_ITEM_NOT_IN_ORDER` | 422 | `POST /orders/:id/split {split_type: 'by_item'}` lists an `order_item_id` that doesn't belong to this order. Phase 2, session 2f-ii. |
+| `SPLIT_ITEM_DOUBLE_ALLOCATED` | 422 | `POST /orders/:id/split {split_type: 'by_item'}` lists the same `order_item_id` in more than one allocation. Phase 2, session 2f-ii. |
+| `SPLIT_ITEM_CANCELLED` | 422 | `POST /orders/:id/split {split_type: 'by_item'}` lists an item whose status is `cancelled`. A dedicated code rather than reusing `ITEM_ALREADY_CANCELLED` — that code is documented at 409 elsewhere, and this rule is 422 per `docs/phase2/2f-ii.md`. Phase 2, session 2f-ii. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |

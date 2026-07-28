@@ -122,6 +122,11 @@ export const ERROR_CODES = [
   'SPLIT_WAYS_INVALID',
   'ORDER_ALREADY_PAID',
 
+  // ── Orders — split by item / by seat (Phase 2, session 2f-ii) ────────────
+  'SPLIT_ITEM_NOT_IN_ORDER',
+  'SPLIT_ITEM_DOUBLE_ALLOCATED',
+  'SPLIT_ITEM_CANCELLED',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',

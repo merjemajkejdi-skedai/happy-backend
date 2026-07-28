@@ -8,17 +8,59 @@ import * as splitService from './splitService';
 // mergeParams: true — mounted at /orders/:id, same as lifecycleRouter/coursesRouter.
 export const splitRouter = Router({ mergeParams: true });
 
-splitRouter.post('/split', requirePermission('order.split'), async (req: Request, res: Response) => {
-  const { split_type, ways } = req.body ?? {};
-  if (split_type !== 'equal') return sendError(res, 'VALIDATION_ERROR', "split_type must be 'equal'");
-  if (!Number.isInteger(ways)) return sendError(res, 'VALIDATION_ERROR', 'ways must be an integer');
+function isValidAllocationsShape(allocations: unknown): allocations is { order_item_ids: string[]; label?: string }[] {
+  return (
+    Array.isArray(allocations) &&
+    allocations.every(
+      a =>
+        a && typeof a === 'object' &&
+        Array.isArray((a as { order_item_ids?: unknown }).order_item_ids) &&
+        (a as { order_item_ids: unknown[] }).order_item_ids.every(id => typeof id === 'string') &&
+        ((a as { label?: unknown }).label === undefined || typeof (a as { label?: unknown }).label === 'string'),
+    )
+  );
+}
 
-  const [result, settings] = await Promise.all([
-    splitService.splitEqual(req.auth!.venueId, req.auth!.userId, req.params.id, ways),
-    getSettingsRow(req.auth!.venueId),
-  ]);
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+splitRouter.post('/split', requirePermission('order.split'), async (req: Request, res: Response) => {
+  const { split_type } = req.body ?? {};
+
+  if (split_type === 'equal') {
+    const { ways } = req.body ?? {};
+    if (!Number.isInteger(ways)) return sendError(res, 'VALIDATION_ERROR', 'ways must be an integer');
+
+    const [result, settings] = await Promise.all([
+      splitService.splitEqual(req.auth!.venueId, req.auth!.userId, req.params.id, ways),
+      getSettingsRow(req.auth!.venueId),
+    ]);
+    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+  }
+
+  if (split_type === 'by_item') {
+    const { allocations } = req.body ?? {};
+    if (!isValidAllocationsShape(allocations)) {
+      return sendError(res, 'VALIDATION_ERROR', 'allocations must be an array of { order_item_ids: string[], label? }');
+    }
+    const mapped = allocations.map(a => ({ orderItemIds: a.order_item_ids, label: a.label ?? null }));
+
+    const [result, settings] = await Promise.all([
+      splitService.splitByItem(req.auth!.venueId, req.auth!.userId, req.params.id, mapped),
+      getSettingsRow(req.auth!.venueId),
+    ]);
+    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+  }
+
+  if (split_type === 'by_seat') {
+    const [result, settings] = await Promise.all([
+      splitService.splitBySeat(req.auth!.venueId, req.auth!.userId, req.params.id),
+      getSettingsRow(req.auth!.venueId),
+    ]);
+    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
+    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+  }
+
+  return sendError(res, 'VALIDATION_ERROR', "split_type must be 'equal', 'by_item', or 'by_seat'");
 });
 
 splitRouter.get('/splits', requirePermission('order.view_own'), async (req: Request, res: Response) => {

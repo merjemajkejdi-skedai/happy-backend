@@ -1,8 +1,8 @@
 import { scopedPrisma } from '../../middleware/venueScope';
-import { err, getVenueAndSettings, type OrderDomainError } from './validation';
+import { err, getVenueAndSettings, type OrderDomainError, type Tx } from './validation';
 import { allocateNumbers, formatTicketNumber } from './ticketNumbering';
 import { recomputeOrder } from './ordersService';
-import { Prisma, type Order } from '../../generated/prisma/client';
+import { Prisma, type Order, type OrderItem, type RestaurantSettings, type Venue } from '../../generated/prisma/client';
 
 export type SplitResult<T> = { ok: true; value: T } | { ok: false; error: OrderDomainError };
 
@@ -129,6 +129,198 @@ export async function splitEqual(venueId: string, actorUserId: string, orderId: 
     return created;
   });
 
+  return { ok: true, value: children };
+}
+
+// ── Split by item / by seat ──────────────────────────────────────────────────
+//
+// Unlike equal split, items MOVE — the existing order_item row is updated
+// in place (order_id changes; every snapshot, status, and timestamp is left
+// untouched so a moved item's kitchen state survives exactly as it was).
+// split_from_order_id always records the order the item most recently moved
+// out of; original_order_item_id is set once, the first time an item ever
+// moves, and never overwritten again — it stays the lineage root across any
+// number of future moves (a later split of this same child would just carry
+// the value forward via the `?? item.id` fallback below finding it already set).
+
+export interface SplitAllocation {
+  orderItemIds: string[];
+  label?: string | null;
+}
+
+async function createChildOrderShell(
+  tx: Tx,
+  venue: Venue,
+  settings: RestaurantSettings,
+  parent: Order,
+  actorUserId: string,
+  splitType: 'by_item' | 'by_seat',
+  sequence: number,
+): Promise<Order> {
+  const needsTicket = parent.serviceMode === 'counter';
+  const { orderNumber, ticketCounterValue } = await allocateNumbers(tx, parent.venueId, venue.timezone, settings.ticketNumberReset, needsTicket);
+  const ticketNumber = needsTicket ? formatTicketNumber(settings.ticketNumberPrefix, ticketCounterValue!) : null;
+
+  return tx.order.create({
+    data: {
+      venueId: parent.venueId,
+      orderNumber,
+      serviceMode: parent.serviceMode,
+      tableId: parent.tableId,
+      ticketNumber,
+      status: 'draft', // recomputed below the moment its items are attached
+      openedByUserId: actorUserId,
+      parentOrderId: parent.id,
+      splitType,
+      splitSequence: sequence,
+      shiftId: parent.shiftId,
+      businessDate: parent.businessDate,
+    },
+  });
+}
+
+async function checkAllocationSplitGate(venueId: string, orderId: string): Promise<SplitResult<{ parent: Order; venue: Venue; settings: RestaurantSettings }>> {
+  const parent = await scopedPrisma.order.findFirst({ where: { id: orderId, venueId } });
+  if (!parent) return { ok: false, error: err(404, 'NOT_FOUND', 'Order not found') };
+  if (parent.status === 'closed' || parent.status === 'cancelled') {
+    return { ok: false, error: err(409, 'ORDER_NOT_MODIFIABLE', `Cannot split an order with status '${parent.status}'`) };
+  }
+
+  const { venue, settings } = await getVenueAndSettings(venueId);
+  // by_seat is "a convenience over by_item, not a separate flag" per
+  // 2f-ii.md section 3 — both types share this one gate.
+  if (!settings.splitBillEnabled || !settings.splitByItemEnabled) {
+    return { ok: false, error: err(403, 'SPLIT_MODE_DISABLED', 'Item/seat split is not enabled for this venue') };
+  }
+  if (parent.amountPaid.greaterThan(0)) {
+    return { ok: false, error: err(409, 'ORDER_ALREADY_PAID', 'This order has already been paid, at least partially, and cannot be split') };
+  }
+  return { ok: true, value: { parent, venue, settings } };
+}
+
+async function moveItemsIntoChildren(
+  venueId: string,
+  actorUserId: string,
+  parent: Order,
+  venue: Venue,
+  settings: RestaurantSettings,
+  splitType: 'by_item' | 'by_seat',
+  allocations: SplitAllocation[],
+  itemById: Map<string, OrderItem>,
+): Promise<Order[]> {
+  return scopedPrisma.$transaction(async tx => {
+    const created: Order[] = [];
+    const moves: { childId: string; itemIds: string[]; label?: string | null }[] = [];
+
+    for (let i = 0; i < allocations.length; i++) {
+      const child = await createChildOrderShell(tx, venue, settings, parent, actorUserId, splitType, i + 1);
+      moves.push({ childId: child.id, itemIds: allocations[i].orderItemIds, label: allocations[i].label ?? null });
+
+      for (const itemId of allocations[i].orderItemIds) {
+        const item = itemById.get(itemId)!;
+        await tx.orderItem.update({
+          where: { id: itemId },
+          data: { orderId: child.id, splitFromOrderId: parent.id, originalOrderItemId: item.originalOrderItemId ?? item.id },
+        });
+      }
+
+      // Recomputes the child's own totals from the items it now holds
+      // (their real tax_rate_snapshot, unlike equal split) and lazily
+      // creates whatever order_courses rows those items' course_number
+      // values need. Push the RECOMPUTED row, not the pre-recompute shell —
+      // the shell's totals are all still zero at creation time.
+      const recomputedChild = await recomputeOrder(tx, venueId, child.id);
+      created.push(recomputedChild);
+    }
+
+    // Recomputes the parent from whatever items it has left — essential,
+    // not optional: skipping this would leave the parent's totals stale and
+    // silently double-count the tax/subtotal of every item that just moved.
+    await recomputeOrder(tx, venueId, parent.id);
+
+    // "drop empty course rows on the parent only if they were auto-created"
+    // (2f-ii.md section 5). Every order_courses row in this codebase is
+    // lazily auto-created by recomputeOrder's own course roll-up the moment
+    // an item first carries that course_number — there is no other creation
+    // path — so a row that's both empty (item_count 0, per the recompute
+    // just above) and never fired is pure bookkeeping with no history worth
+    // keeping. A row that WAS fired stays, even if now empty, since it
+    // represents real kitchen activity.
+    await tx.orderCourse.deleteMany({ where: { venueId, orderId: parent.id, itemCount: 0, firedAt: null } });
+
+    await tx.orderEvent.create({
+      data: { venueId, orderId: parent.id, eventType: 'order.split', actorUserId, payload: { splitType, allocations: moves } },
+    });
+
+    return created;
+  });
+}
+
+export async function splitByItem(venueId: string, actorUserId: string, orderId: string, allocations: SplitAllocation[]): Promise<SplitResult<Order[]>> {
+  const gate = await checkAllocationSplitGate(venueId, orderId);
+  if (!gate.ok) return gate;
+  const { parent, venue, settings } = gate.value;
+
+  if (allocations.length === 0 || allocations.length > settings.splitMaxWays) {
+    return { ok: false, error: err(422, 'SPLIT_WAYS_INVALID', `Number of allocations must be between 1 and ${settings.splitMaxWays}`) };
+  }
+  for (const a of allocations) {
+    if (!Array.isArray(a.orderItemIds) || a.orderItemIds.length === 0) {
+      return { ok: false, error: err(422, 'VALIDATION_ERROR', 'Each allocation must list at least one order_item_id') };
+    }
+  }
+
+  const allItemIds = allocations.flatMap(a => a.orderItemIds);
+  const uniqueItemIds = new Set(allItemIds);
+  if (uniqueItemIds.size !== allItemIds.length) {
+    return { ok: false, error: err(422, 'SPLIT_ITEM_DOUBLE_ALLOCATED', 'An item cannot appear in more than one allocation') };
+  }
+
+  const items = await scopedPrisma.orderItem.findMany({ where: { id: { in: [...uniqueItemIds] }, orderId, venueId } });
+  const itemById = new Map(items.map(i => [i.id, i]));
+  for (const id of uniqueItemIds) {
+    if (!itemById.has(id)) return { ok: false, error: err(422, 'SPLIT_ITEM_NOT_IN_ORDER', `Item ${id} does not belong to this order`) };
+  }
+  for (const item of items) {
+    if (item.status === 'cancelled') {
+      return { ok: false, error: err(422, 'SPLIT_ITEM_CANCELLED', `Item ${item.id} has been cancelled and cannot be allocated`) };
+    }
+  }
+
+  const children = await moveItemsIntoChildren(venueId, actorUserId, parent, venue, settings, 'by_item', allocations, itemById);
+  return { ok: true, value: children };
+}
+
+// Items with no seat assigned stay on the parent — grouping only ever
+// considers active (non-cancelled) items, so a cancelled item never drags a
+// seat's other items into a move, and never gets moved itself. Zero distinct
+// seats among the order's active items is a no-op success (nothing to
+// split), matching this codebase's established idempotent-no-op convention
+// for "nothing to do" (e.g. re-firing an already-fired course).
+export async function splitBySeat(venueId: string, actorUserId: string, orderId: string): Promise<SplitResult<Order[]>> {
+  const gate = await checkAllocationSplitGate(venueId, orderId);
+  if (!gate.ok) return gate;
+  const { parent, venue, settings } = gate.value;
+
+  const items = await scopedPrisma.orderItem.findMany({
+    where: { orderId, venueId, status: { not: 'cancelled' }, seatNumber: { not: null } },
+  });
+  const bySeat = new Map<number, string[]>();
+  for (const item of items) {
+    const seat = item.seatNumber!;
+    const list = bySeat.get(seat) ?? [];
+    list.push(item.id);
+    bySeat.set(seat, list);
+  }
+  const seats = [...bySeat.keys()].sort((a, b) => a - b);
+  if (seats.length === 0) return { ok: true, value: [] };
+  if (seats.length > settings.splitMaxWays) {
+    return { ok: false, error: err(422, 'SPLIT_WAYS_INVALID', `Number of distinct seats (${seats.length}) exceeds split_max_ways (${settings.splitMaxWays})`) };
+  }
+
+  const allocations: SplitAllocation[] = seats.map(seat => ({ orderItemIds: bySeat.get(seat)!, label: `Seat ${seat}` }));
+  const itemById = new Map(items.map(i => [i.id, i]));
+  const children = await moveItemsIntoChildren(venueId, actorUserId, parent, venue, settings, 'by_seat', allocations, itemById);
   return { ok: true, value: children };
 }
 

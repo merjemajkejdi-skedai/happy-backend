@@ -171,6 +171,19 @@ Requires `split_bill_enabled` AND `split_equal_enabled`, else 403 `SPLIT_MODE_DI
 | GET | `/orders/{id}/splits` | `order.view_own` | The child orders for a given parent, ordered by `split_sequence`. | — |
 | POST | `/orders/{id}/splits/{childId}/merge-back` | `order.split` | Undo — only while the child is unpaid (409 `ORDER_ALREADY_PAID` otherwise). Deletes the child order (its synthetic item cascades), then recomputes the parent (a no-op in practice, since the parent's own items were never touched by the split). | — |
 
+## Orders — split by item / by seat (Phase 2, session 2f-ii)
+
+Requires `split_bill_enabled` AND `split_by_item_enabled`, else 403 `SPLIT_MODE_DISABLED` (`by_seat` shares this flag — it is "a convenience over `by_item`," not a separate setting). Blocked once `amount_paid > 0` (409 `ORDER_ALREADY_PAID`) or the order is `closed`/`cancelled` (409 `ORDER_NOT_MODIFIABLE`). Unlike equal split, real items MOVE to the child (`order_id` reassigned in place) — every snapshot, status, and timestamp is preserved exactly, so a moved item keeps its kitchen state. `split_from_order_id` records the order the item most recently moved out of; `original_order_item_id` is set once, on an item's first-ever move, and never overwritten again. Parent and every child are recomputed from their own items through the normal totals formula (real `tax_rate_snapshot` per item, not the already-taxed-share trick equal split uses) — the sum across parent and children always equals the original parent total. `order_courses` rows are lazily created on a child the moment one of its items carries a course number (the same mechanism `recomputeOrder` already uses everywhere); an empty, never-fired course row left behind on the parent is deleted, but a fired one is kept regardless of its item count.
+
+`POST /orders/:id/split` — same route as equal split, dispatched by `split_type`:
+
+| `split_type` | Body | Description |
+|---|---|---|
+| `by_item` | `{split_type: 'by_item', allocations: [{order_item_ids: string[], label?}, ...]}` | One child per allocation, 1 to `split_max_ways` of them (422 `SPLIT_WAYS_INVALID` outside that range). Every listed item must belong to this order (422 `SPLIT_ITEM_NOT_IN_ORDER`), appear in at most one allocation (422 `SPLIT_ITEM_DOUBLE_ALLOCATED`), and not be `cancelled` (422 `SPLIT_ITEM_CANCELLED`). Items not listed in any allocation stay on the parent. |
+| `by_seat` | `{split_type: 'by_seat'}` | One child per distinct `seat_number` among the order's active items, in ascending seat order; items with no seat stay on the parent. No distinct seats is a no-op success (`[]`). |
+
+`GET /orders/:id/splits` and `POST /orders/:id/splits/:childId/merge-back` are shared with equal split — see the section above. `merge-back` was designed for undoing an *equal* split (it deletes the child and its single synthetic item); running it on a `by_item`/`by_seat` child would delete real order items along with it, which is very likely not what's wanted — treat merge-back as equal-split-only until a future session addresses reversing an item-level split explicitly.
+
 ## Orders — course firing (Phase 2, session 2c)
 
 Every route below requires `send_by_course=true` AND `venue_type` in (`happy_restaurant`, `happy_hybrid`) — 403 `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` otherwise (venue type checked first).
