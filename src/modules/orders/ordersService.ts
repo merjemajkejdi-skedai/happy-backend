@@ -47,8 +47,11 @@ export async function recomputeOrder(
   orderId: string,
   options?: { explicitFlag?: ExplicitOrderFlag; extraData?: Prisma.OrderUncheckedUpdateInput },
 ): Promise<Order> {
-  const items = await tx.orderItem.findMany({ where: { orderId, venueId } });
-  const settings = await tx.restaurantSettings.findUnique({ where: { venueId } });
+  const [items, settings, current] = await Promise.all([
+    tx.orderItem.findMany({ where: { orderId, venueId } }),
+    tx.restaurantSettings.findUnique({ where: { venueId } }),
+    tx.order.findUniqueOrThrow({ where: { id: orderId } }),
+  ]);
   if (!settings) throw new Error(`restaurant_settings missing for venue ${venueId}`);
 
   let subtotal = new Prisma.Decimal(0);
@@ -62,11 +65,21 @@ export async function recomputeOrder(
   const discountTotal = new Prisma.Decimal(0); // stays 0 in Phase 1
   const grandTotal = subtotal.plus(taxTotal).plus(serviceChargeTotal).minus(discountTotal);
 
+  // Phase 2, session 2g-i. amount_due tracks grand_total independently of
+  // amount_paid (payments.ts's own recomputeOrderPayments is the other half
+  // of this pair — it refreshes amount_due too, whenever payments change
+  // instead of items). Keeping both recompute paths responsible for this
+  // column is what keeps it correct regardless of which side moved: adding
+  // an item to an already-partially-paid order must raise amount_due just
+  // as much as taking a payment must lower it. Clamped at 0 rather than
+  // going negative on a cash overpayment (see paymentsService.ts).
+  const amountDue = Prisma.Decimal.max(grandTotal.minus(current.amountPaid), new Prisma.Decimal(0));
+
   const status = deriveOrderStatus(items, options?.explicitFlag);
 
   const updated = await tx.order.update({
     where: { id: orderId },
-    data: { subtotal, taxTotal, serviceChargeTotal, discountTotal, grandTotal, status, ...options?.extraData },
+    data: { subtotal, taxTotal, serviceChargeTotal, discountTotal, grandTotal, amountDue, status, ...options?.extraData },
   });
 
   await recomputeCourses(tx, venueId, orderId, items, settings);

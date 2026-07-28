@@ -243,6 +243,18 @@ export async function closeOrder(venueId: string, actorUserId: string, orderId: 
     return { ok: false, error: err(409, 'ORDER_HAS_UNSERVED_ITEMS', 'All non-cancelled items must be served before closing this order') };
   }
 
+  // Phase 2, session 2g-i. Checked last, after the pending-void and
+  // unserved-items gates, so a caller failing more than one guard always
+  // sees the same blocking condition first — deterministic per 2g-i.md
+  // section 3's explicit requirement. amount_due is read straight off the
+  // already-fetched order row rather than recomputed here: every payment
+  // mutation (paymentsService.ts) keeps it current as a side effect, so
+  // there's nothing stale to refresh at close time.
+  const { settings } = await getVenueAndSettings(venueId);
+  if (settings.requirePaymentToClose && order.amountDue.greaterThan(0)) {
+    return { ok: false, error: err(409, 'ORDER_NOT_SETTLED', 'This order must be fully paid before it can be closed') };
+  }
+
   const updated = await scopedPrisma.$transaction(async tx => {
     const result = await recomputeOrder(tx, venueId, orderId, {
       explicitFlag: 'closed',

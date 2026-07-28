@@ -99,7 +99,7 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `COUNTER_SERVICE_DISABLED` | 422 | `service_mode: 'counter'` at a venue with `counter_service_enabled=false`. |
 | `TABLE_ID_REQUIRED` / `TABLE_ID_NOT_ALLOWED` | 422 | `table_id` missing for table mode, or present for counter mode. |
 | `TABLE_ALREADY_HAS_ACTIVE_ORDER` | 409 | The target table already has an active order (DB partial-unique-index enforced). |
-| `ORDER_NOT_MODIFIABLE` | 409 | Adding an item to an order whose status is `served`/`closed`/`cancelled`. Also fired by `POST /orders/:id/split` on a `closed`/`cancelled` order (2f-i), and by `POST\|GET /orders/:id/merge\|merge-preview` when either order is `closed`/`cancelled`/`merged` (2f-iii). |
+| `ORDER_NOT_MODIFIABLE` | 409 | Adding an item to an order whose status is `served`/`closed`/`cancelled`. Also fired by `POST /orders/:id/split` on a `closed`/`cancelled` order (2f-i), by `POST\|GET /orders/:id/merge\|merge-preview` when either order is `closed`/`cancelled`/`merged` (2f-iii), and by `POST /orders/:id/payments` on a `closed`/`cancelled`/`merged` order (2g-i). |
 | `MENU_ITEM_UNAVAILABLE` | 422 | The menu item is 86'd (`is_available=false`) or no longer exists. |
 | `MODIFIER_SELECTION_INVALID` | 422 | A submitted modifier option id doesn't resolve to a real, active option at this venue. Fires regardless of `require_modifier_validation` — this is referential integrity, not a business rule. |
 | `MODIFIER_GROUP_REQUIRED` | 422 | An attached group with `is_required=true` has zero selections. Phase 2, session 2b-ii. Gated by `require_modifier_validation`. |
@@ -119,6 +119,11 @@ Session 2a-ii activated all five roles (`waiter`/`kitchen`/`admin`/`manager`/`ba
 | `MERGE_DISABLED` | 403 | `POST\|GET /orders/:id/merge\|merge-preview` while `merge_tables_enabled=false`. Phase 2, session 2f-iii. |
 | `MERGE_REQUIRES_MANAGER` | 403 | `POST\|GET /orders/:id/merge\|merge-preview` by a waiter while `merge_requires_manager=true`. Also enforced one layer up by `resolvePermissions` narrowing `order.merge` away from waiter under the same condition — a waiter's HTTP request never reaches this check in practice, but a direct service call does. Phase 2, session 2f-iii. |
 | `MERGE_ORDER_HAS_SPLIT` | 409 | `POST\|GET /orders/:id/merge\|merge-preview` where either order is a split-bill child (`parent_order_id` set), or a split-bill parent with at least one live (not `closed`/`cancelled`/`merged`) child. Phase 2, session 2f-iii. |
+| `PAYMENT_METHOD_DISABLED` | 422 | `POST /orders/:id/payments` with a `method` not present in `payment_methods_enabled`. Phase 2, session 2g-i. |
+| `PAYMENT_EXCEEDS_DUE` | 422 | `POST /orders/:id/payments` for any method except `cash` with `amount > amount_due`. Cash is the one tender allowed to exceed it. Phase 2, session 2g-i. |
+| `PARTIAL_PAYMENT_NOT_ALLOWED` | 422 | `POST /orders/:id/payments` with `amount < amount_due` while `allow_partial_payment=false`. Phase 2, session 2g-i. |
+| `PAYMENT_ALREADY_VOIDED` | 409 | `DELETE /orders/:id/payments/:pid` on a payment that already has `is_voided=true`. Phase 2, session 2g-i. |
+| `ORDER_NOT_SETTLED` | 409 | `POST /orders/:id/close` while `require_payment_to_close=true` and `amount_due > 0`. Checked after `ORDER_HAS_PENDING_VOID`/`ORDER_HAS_UNSERVED_ITEMS`. Phase 2, session 2g-i. |
 | `NOTES_NOT_ALLOWED` | 422 | `notes` submitted while `allow_free_text_notes=false`. |
 | `ITEM_ALREADY_SENT` | 409 | `PATCH .../items/:itemId` on an item whose status is no longer `pending`. |
 | `ITEM_ALREADY_CANCELLED` | 409 | Voiding an item that's already cancelled. |

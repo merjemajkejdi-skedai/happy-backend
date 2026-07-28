@@ -203,6 +203,20 @@ Merge is **irreversible** in Phase 2 — there is no undo. `GET .../merge-previe
 
 Events: `order.merged` appended to the target, `order.absorbed` appended to the source — never a single event trying to describe both sides at once, since `order_events.order_id` can only ever point to one order.
 
+## Orders — payments (Phase 2, session 2g-i)
+
+A cash-drawer log, not a payment processor — no gateway, no card data, no PCI scope. `method` must be in `payment_methods_enabled` (JSON array, default `["cash","card"]`), else 422 `PAYMENT_METHOD_DISABLED`. `amount` is always exactly what this payment contributes to `orders.amount_paid` — never server-capped. For every method except `cash`, `amount` may not exceed `amount_due` (422 `PAYMENT_EXCEEDS_DUE`); cash is the one tender allowed to exceed it ("overpayment"), and when `received_amount` is also given, `change_amount = received_amount - amount` (`received_amount` is rejected outside `cash`). `allow_partial_payment=false` requires a single payment to fully settle the current `amount_due` (422 `PARTIAL_PAYMENT_NOT_ALLOWED`). `orders.amount_paid`/`amount_due` are recomputed after every payment create/void — `amount_due` clamps at 0 rather than going negative on a cash overpayment. `shift_id` is copied straight from the order (currently always `null` — no code anywhere populates it yet); `business_date` is computed independently via the venue's timezone (the same `businessDateFor` helper session 2e's stock module already uses), since `orders.business_date` is itself never populated and the column is `NOT NULL`. `taken_by_name` is snapshotted at creation so the record survives the user being deleted later. `room_charge` is a tender label only — it never writes to any `pms_*` column. Payments are blocked on a `closed`/`cancelled`/`merged` order (409 `ORDER_NOT_MODIFIABLE`).
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| POST | `/orders/{id}/payments` | `order.payment` | `{method, amount, tip_amount?, reference?, received_amount?}`. |
+| GET | `/orders/{id}/payments` | `order.view_own` | All payments on this order (voided ones included, `is_voided` distinguishes them), oldest first. |
+| DELETE | `/orders/{id}/payments/{pid}` | `order.payment_void` (manager+) | `{reason}`. Sets `is_voided`/`voided_reason`/`voided_by_user_id` and recomputes the order — the row is never deleted. |
+
+`POST /orders/:id/close` (existing route) gains one more gate when `require_payment_to_close=true`: 409 `ORDER_NOT_SETTLED` while `amount_due > 0`. Checked last, after the existing pending-void (`ORDER_HAS_PENDING_VOID`, 2d-i) and unserved-items (`ORDER_HAS_UNSERVED_ITEMS`) gates, so an order failing more than one of these always reports the same blocking condition first, deterministically.
+
+Split children (2f-i/2f-ii) carry independent payments — paying a child never touches the parent's `amount_paid`/`amount_due`, and paying the parent (`amount_paid > 0`) blocks further splitting via the existing `ORDER_ALREADY_PAID` guard.
+
 ## Orders — course firing (Phase 2, session 2c)
 
 Every route below requires `send_by_course=true` AND `venue_type` in (`happy_restaurant`, `happy_hybrid`) — 403 `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` otherwise (venue type checked first).

@@ -1,0 +1,42 @@
+# Session 2g-i — Payment Capture
+
+**Status:** Complete. Full suite green (26 files / 555 tests), `tsc --noEmit` clean. No migration needed — `payments`, `orders.amount_paid`/`amount_due`, and `restaurant_settings.payment_methods_enabled`/`allow_partial_payment`/`require_payment_to_close` were all already in place from 2a-i; this session is the first to write real logic against them.
+
+## Implemented
+
+### 1. `src/modules/orders/paymentsService.ts`
+
+- `recomputeOrderPayments(tx, venueId, orderId)` — sums non-voided payments into `amount_paid`; `amount_due = max(grand_total - amount_paid, 0)`, clamped rather than negative (a cash overpayment can legitimately push `amount_paid` past `grand_total`).
+- `createPayment` — 404/`ORDER_NOT_MODIFIABLE` (closed/cancelled/merged) guards; `amount`/`tip_amount` shape validation; 422 `PAYMENT_METHOD_DISABLED` unless `method` is in `payment_methods_enabled`; `received_amount` rejected outside `cash`, `change_amount = received_amount - amount` when given; 422 `PAYMENT_EXCEEDS_DUE` for any non-cash method where `amount > amount_due` (cash is exempt); 422 `PARTIAL_PAYMENT_NOT_ALLOWED` when `allow_partial_payment=false` and `amount < amount_due`. Snapshots `taken_by_name`; `shift_id` copied from the order, `business_date` computed independently (see interpretation call below). One transaction: create the row, `recomputeOrderPayments`, `payment.taken` event.
+- `listPayments` — all payments (voided included, `is_voided` distinguishes), oldest first.
+- `voidPayment` — 404/409 `PAYMENT_ALREADY_VOIDED` guards, sets `is_voided`/`voided_reason`/`voided_by_user_id`, recomputes, `payment.voided` event. Never deletes the row.
+
+### 2. `ordersService.ts` — `recomputeOrder` now also maintains `amount_due`
+
+A real bug found and fixed while writing this session's own tests, not a pre-existing note from a prior session: `recomputeOrder` (the items-driven totals recompute, used everywhere — add/void/send/serve/close/split/merge) never touched `amount_paid`/`amount_due` at all. Since `amount_due`'s schema default is `0`, a brand-new order's `amount_due` stayed `0` — not `grand_total` — until the *first* payment ever ran `recomputeOrderPayments`. That broke every guard that reads `amount_due` before any payment exists: `allow_partial_payment=false` never rejected anything (any `amount < 0` is false), non-cash overpayment rejection fired for *any* non-cash amount at all (since anything `> 0`), and `require_payment_to_close` never blocked an unpaid order's close. Fixed by having `recomputeOrder` also fetch the order's current `amount_paid` and set `amount_due = max(grand_total - amount_paid, 0)` on every recompute — so either recompute path (items changing via `recomputeOrder`, or payments changing via `recomputeOrderPayments`) independently keeps `amount_due` correct regardless of which side moved. Confirmed via the full suite that no other session's tests depended on the old (broken) always-zero behavior.
+
+### 3. Close guard
+
+`lifecycleService.closeOrder` gains one more check: 409 `ORDER_NOT_SETTLED` when `require_payment_to_close=true` and `amount_due > 0`. Placed *after* the existing pending-void (`ORDER_HAS_PENDING_VOID`, 2d-i) and unserved-items (`ORDER_HAS_UNSERVED_ITEMS`) checks, so an order failing more than one gate always reports the same blocking condition first — the explicit "deterministically" requirement from 2g-i.md section 3.
+
+### 4. Routes + docs
+
+`src/modules/orders/paymentsRoutes.ts` (new): `POST/GET /orders/:id/payments`, `DELETE /orders/:id/payments/:pid`. `order.payment` gates create/list, `order.payment_void` (manager+, already scoped that way in the static matrix since 2a-ii) gates void. Wired into `orders/routes.ts`. `docs/API.md` (new "Orders — payments" section), `docs/ERRORS.md` (5 new codes + notes added to the reused `ORDER_NOT_MODIFIABLE` row). `Payment` added to `venueScope.ts`'s `VENUE_SCOPED_MODELS` — the same pre-existing gap this whole arc keeps finding on every table's first real usage (2a-i created it, nothing queried it directly by venue until now).
+
+## Interpretation calls — flagged explicitly
+
+- **`amount` is always exactly what a payment contributes to `amount_paid` — never server-capped.** Read literally: "Overpayment allowed only for cash... Any other method exceeding amount_due → 422." The parallel structure means the *same* quantity (`amount` vs `amount_due`) is being compared in both clauses — cash is allowed to submit `amount > amount_due` outright, every other method is not. In the common real-world case a waiter enters `amount` equal to what's actually owed and `received_amount` equal to what was physically handed over, so `change_amount` comes out correctly without `amount` itself ever needing to exceed `amount_due` — the cash carve-out only matters for the less common case where `amount` itself is submitted above `amount_due`.
+- **`business_date` is computed independently via `businessDateFor(venue.timezone)`** (reusing 2e's stock-module helper), not copied from `orders.business_date` — that column is still never populated anywhere in this codebase (a pre-existing gap flagged again in 2f-i/2f-ii/2f-iii's own handoffs) and `payments.business_date` is `NOT NULL`, so copying it straight through isn't viable. `shift_id`, which *is* nullable on `payments`, is still copied straight from the order as the spec literally says — it's just always `null` today, same as `orders.shift_id` itself (no code anywhere opens a shift yet).
+- **Payments are blocked on a `closed`/`cancelled`/`merged` order** (reusing `ORDER_NOT_MODIFIABLE`), matching every other order-mutating action in this codebase. Not explicitly stated either way by the spec — a venue that closes an order with a balance still due (when `require_payment_to_close=false`) has no way to record that payment through this endpoint afterward. A real limitation, out of scope to redesign (no "reopen" flow exists), noted here rather than silently assumed away.
+- **`PARTIAL_PAYMENT_NOT_ALLOWED` is judged against the current `amount_due`, not the original `grand_total`.** "A single payment must settle the full amount" reads most sensibly as the *remaining* balance at submission time — otherwise a venue could never legitimately reach `amount_due=0` via more than one payment even if `allow_partial_payment` were toggled on temporarily.
+- **"Payment void by manager only" is verified via the pre-existing, already-tested `roleHasPermission` static matrix** (`order.payment_void` has been manager/admin-only since 2a-ii), not a new role parameter threaded through `voidPayment`. Every other module in this codebase draws the same line: settings-*dependent* permission narrowing (e.g. `order.merge`'s `merge_requires_manager`) gets a redundant service-layer check because only the service can see the setting; a purely static role gate like this one is enforced once, at the route/RBAC layer, and never duplicated in the service.
+
+## Tests
+
+`tests/payments.test.ts` (new, 13 tests): disabled method rejected; cash computes `change_amount` from `received_amount` and separately may submit `amount` itself above `amount_due`; card overpayment rejected; partial payments accumulate correctly across two payments; `allow_partial_payment=false` rejects a partial payment then accepts a full one; `require_payment_to_close` blocks close while unpaid and permits it once settled; void is gated to manager+ (verified against the real permission matrix) and recomputes the order (row survives, never deleted); voiding an already-voided payment rejected; `shift_id`/`business_date` attach correctly; split children pay independently (a child's payment never touches the parent, and the parent's own payment blocks further splitting via the pre-existing 2f-i guard — a genuine end-to-end check of that interaction, this time through a real payment instead of a direct `prisma.order.update` as 2f-i's own tests had to use before this module existed); `room_charge` writes no `pms_*` field.
+
+Full suite: 26 files, 555 tests, all passing. `tsc --noEmit` clean.
+
+## Next session starting point
+
+Per `docs/phase2/README.md`'s numbering (not yet read this session): `docs/phase2/2g-ii.md` exists as the next file in the split/merge/payments arc. This session did not touch shifts (`shift_id` stays `null` throughout, as it has since 2a-i) or the `ShiftReport`/2h-i reporting work referenced in that model's own schema comment.

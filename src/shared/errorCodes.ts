@@ -132,6 +132,13 @@ export const ERROR_CODES = [
   'MERGE_REQUIRES_MANAGER',
   'MERGE_ORDER_HAS_SPLIT',
 
+  // ── Orders — payments (Phase 2, session 2g-i) ─────────────────────────────
+  'PAYMENT_METHOD_DISABLED',
+  'PAYMENT_EXCEEDS_DUE',
+  'PARTIAL_PAYMENT_NOT_ALLOWED',
+  'PAYMENT_ALREADY_VOIDED',
+  'ORDER_NOT_SETTLED',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',
