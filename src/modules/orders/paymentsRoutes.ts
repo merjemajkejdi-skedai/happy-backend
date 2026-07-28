@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { runIdempotent } from '../../lib/idempotency';
 import * as paymentsService from './paymentsService';
 import type { PaymentMethod } from '../../generated/prisma/client';
 
@@ -18,15 +19,17 @@ paymentsRouter.post('/payments', requirePermission('order.payment'), async (req:
     return sendError(res, 'VALIDATION_ERROR', 'amount is required');
   }
 
-  const result = await paymentsService.createPayment(req.auth!.venueId, req.auth!.userId, req.params.id, {
-    method,
-    amount,
-    tipAmount: tip_amount ?? null,
-    reference: reference ?? null,
-    receivedAmount: received_amount ?? null,
+  await runIdempotent(req, res, 'POST /orders/:id/payments', async () => {
+    const result = await paymentsService.createPayment(req.auth!.venueId, req.auth!.userId, req.params.id, {
+      method,
+      amount,
+      tipAmount: tip_amount ?? null,
+      reference: reference ?? null,
+      receivedAmount: received_amount ?? null,
+    });
+    if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+    return { status: 200, body: { data: result.value, meta: {} } };
   });
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, result.value);
 });
 
 paymentsRouter.get('/payments', requirePermission('order.view_own'), async (req: Request, res: Response) => {

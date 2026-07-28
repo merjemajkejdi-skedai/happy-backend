@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { runIdempotent } from '../../lib/idempotency';
 import { getSettingsRow } from '../settings/service';
 import { serializeOrder } from './serializers';
 import * as mergeService from './mergeService';
@@ -29,13 +30,21 @@ mergeRouter.post('/merge', requirePermission('order.merge'), async (req: Request
     return sendError(res, 'VALIDATION_ERROR', 'source_order_id is required');
   }
 
-  const [result, settings] = await Promise.all([
-    mergeService.mergeOrders(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, source_order_id, target_table_id ?? null),
-    getSettingsRow(req.auth!.venueId),
-  ]);
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, {
-    target: serializeOrder(result.value.target, settings?.pmsEnabled),
-    source: serializeOrder(result.value.source, settings?.pmsEnabled),
+  await runIdempotent(req, res, 'POST /orders/:id/merge', async () => {
+    const [result, settings] = await Promise.all([
+      mergeService.mergeOrders(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, source_order_id, target_table_id ?? null),
+      getSettingsRow(req.auth!.venueId),
+    ]);
+    if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+    return {
+      status: 200,
+      body: {
+        data: {
+          target: serializeOrder(result.value.target, settings?.pmsEnabled),
+          source: serializeOrder(result.value.source, settings?.pmsEnabled),
+        },
+        meta: {},
+      },
+    };
   });
 });

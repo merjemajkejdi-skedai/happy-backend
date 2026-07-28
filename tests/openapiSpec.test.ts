@@ -25,8 +25,13 @@ describe('openApiSpec — 200 response shapes', () => {
 
   it('found the expected number of operations with a 200 response', () => {
     // 69 as of Phase 1, +3 in session 2a-ii: GET /users/roles,
-    // PATCH /users/{id}/role, GET /permissions.
-    expect(operations.length).toBe(72);
+    // PATCH /users/{id}/role, GET /permissions. +46 in session 2h-ii, when
+    // the spec was extended to cover every Phase 2 route added across
+    // sessions 2b-i through 2h-ii (courses, void request/approval, stock,
+    // split, merge, payments, fire/void alerts, shifts, reports) — the
+    // snapshot at docs/openapi.json had gone stale since Phase 1 and is
+    // regenerated fresh by this session.
+    expect(operations.length).toBe(118);
   });
 
   it.each(operations)('$key never types 200 as the error envelope', ({ key, schema }) => {

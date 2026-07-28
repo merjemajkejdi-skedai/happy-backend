@@ -393,6 +393,110 @@ const schemas: Record<string, object> = {
       item_count: { type: 'integer' },
     },
   },
+
+  // ── Phase 2 resource schemas ────────────────────────────────────────────
+
+  StockRow: {
+    type: 'object',
+    properties: {
+      menuItemId: { type: 'string', format: 'uuid' },
+      businessDate: { type: 'string', format: 'date' },
+      startingQuantity: { type: 'integer' },
+      remaining: { type: 'integer' },
+      isOrderable: { type: 'boolean' },
+    },
+  },
+
+  OrderCourse: {
+    type: 'object',
+    properties: {
+      courseNumber: { type: 'integer' },
+      status: { type: 'string', enum: ['pending', 'fired', 'served'] },
+      firedAt: { type: ['string', 'null'], format: 'date-time' },
+      firstReadyAt: { type: ['string', 'null'], format: 'date-time' },
+      allServedAt: { type: ['string', 'null'], format: 'date-time' },
+      itemCount: { type: 'integer' },
+    },
+  },
+
+  VoidLog: {
+    type: 'object',
+    description: 'restaurant_void_log row — the append-only audit source for every void figure in reports.',
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      orderId: { type: 'string', format: 'uuid' },
+      orderItemId: { type: ['string', 'null'], format: 'uuid' },
+      stage: { type: 'string', enum: ['before_send', 'after_send'] },
+      status: { type: 'string', enum: ['auto_approved', 'pending_approval', 'approved', 'rejected'] },
+      reasonCode: { type: ['string', 'null'] },
+      reasonText: { type: ['string', 'null'] },
+      voidValue: money,
+      requestedByUserId: { type: 'string', format: 'uuid' },
+      requestedByName: { type: 'string' },
+      resolvedByUserId: { type: ['string', 'null'], format: 'uuid' },
+      rejectionReason: { type: ['string', 'null'] },
+      businessDate: { type: 'string', format: 'date' },
+      createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+
+  Payment: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      orderId: { type: 'string', format: 'uuid' },
+      method: { type: 'string', enum: ['cash', 'card', 'bank_transfer', 'voucher', 'room_charge', 'other'] },
+      amount: money,
+      tipAmount: money,
+      receivedAmount: { type: ['number', 'null'], description: 'Cash only — what the guest handed over, for change calculation.' },
+      reference: { type: ['string', 'null'] },
+      isVoided: { type: 'boolean' },
+      createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+
+  Shift: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      businessDate: { type: 'string', format: 'date' },
+      name: { type: ['string', 'null'] },
+      status: { type: 'string', enum: ['open', 'closed'] },
+      openedByUserId: { type: 'string', format: 'uuid' },
+      openedAt: { type: 'string', format: 'date-time' },
+      closedByUserId: { type: ['string', 'null'], format: 'uuid' },
+      closedAt: { type: ['string', 'null'], format: 'date-time' },
+      openingFloat: money,
+      closingCashCounted: { type: ['number', 'null'] },
+      cashVariance: { type: ['number', 'null'] },
+      notes: { type: ['string', 'null'] },
+    },
+  },
+
+  ReportPayload: {
+    type: 'object',
+    description: 'The full computeReport() output — see docs/phase2/REPORT-PAYLOAD.md for the authoritative field-by-field spec and computation rules. Every figure derives from snapshot columns; a finalized report (is_final=true) is served verbatim, never recomputed.',
+    properties: {
+      period: {
+        type: 'object',
+        properties: {
+          start: { type: 'string', format: 'date-time' },
+          end: { type: 'string', format: 'date-time' },
+          business_dates: { type: 'array', items: { type: 'string', format: 'date' } },
+        },
+      },
+      shift: { type: ['object', 'null'], description: 'null for a multi-shift range report.' },
+      revenue: { type: 'object' },
+      orders: { type: 'object' },
+      covers: { type: 'object' },
+      waiters: { type: 'array', items: { type: 'object' } },
+      voids: { type: 'object' },
+      payments: { type: 'object' },
+      top_items: { type: 'array', items: { type: 'object' } },
+      destinations: { type: 'object' },
+      courses: { type: ['object', 'null'], description: 'null for happy_bar venues.' },
+    },
+  },
 };
 
 // ── Path helpers ─────────────────────────────────────────────────────────────
@@ -747,6 +851,10 @@ const paths: Record<string, Record<string, object>> = {
     }),
   },
   '/menu/items/{id}/modifier-groups': {
+    get: op('Modifier groups attached to this item, with their options (requires menu.view)', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/ModifierGroup' } })) },
+    }),
     post: op('Replace the full set of modifier groups attached to this item (requires menu.write)', ['Menu'], {
       parameters: [pathParam('id', 'Item id')],
       requestBody: { type: 'object', required: ['group_ids'], properties: { group_ids: { type: 'array', items: { type: 'string' } } } },
@@ -793,6 +901,66 @@ const paths: Record<string, Record<string, object>> = {
     delete: op('Soft-delete a modifier option (requires menu.write)', ['Menu'], {
       parameters: [pathParam('id', 'Option id')],
       responses: { '200': response('OK', envelope({ type: 'object', properties: { deleted: { type: 'boolean' } } })) },
+    }),
+  },
+
+  // ── Menu — stock & 86 (Phase 2, session 2e) ─────────────────────────────
+  '/menu/items/{id}/86': {
+    post: op('86 an item — mark unavailable, with an optional reason (requires menu.eightysix, settings-resolved)', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      requestBody: { type: 'object', properties: { reason: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/StockRow' })) },
+    }),
+  },
+  '/menu/items/{id}/restore': {
+    post: op('Restore a stock-86\'d item to orderable (requires menu.eightysix, settings-resolved)', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/StockRow' })) },
+    }),
+  },
+  '/menu/items/{id}/stock': {
+    patch: op('Set today\'s starting stock ({starting_quantity}) or adjust an existing baseline ({delta}) (requires menu.stock) — 422 ITEM_NOT_STOCK_TRACKED with no baseline yet', ['Menu'], {
+      parameters: [pathParam('id', 'Item id')],
+      requestBody: { type: 'object', properties: { starting_quantity: { type: 'integer' }, delta: { type: 'integer' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/StockRow' })) },
+    }),
+  },
+  '/menu/stock': {
+    get: op('Today\'s stock levels for every tracked item (requires menu.view)', ['Menu'], {
+      parameters: [queryParam('business_date')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/StockRow' } })) },
+    }),
+  },
+  '/menu/stock/movements': {
+    get: op('Paginated stock movement ledger (requires reports.view)', ['Menu'], {
+      parameters: [...paginationParams, queryParam('menu_item_id'), queryParam('from'), queryParam('to')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { type: 'object' } }, paginationMeta)) },
+    }),
+  },
+  '/menu/stock/low': {
+    get: op('Items at or below their low-stock threshold today (requires menu.view)', ['Menu'], {
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/StockRow' } })) },
+    }),
+  },
+  '/menu/stock/bulk-set': {
+    post: op('Set today\'s starting stock for many items at once (requires menu.stock)', ['Menu'], {
+      requestBody: {
+        type: 'object',
+        required: ['items'],
+        properties: {
+          items: {
+            type: 'array',
+            items: { type: 'object', properties: { menu_item_id: { type: 'string' }, starting_quantity: { type: 'integer' } } },
+          },
+        },
+      },
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/StockRow' } })) },
+    }),
+  },
+  '/menu/stock/day-open': {
+    post: op('Roll every stock-tracked item\'s remaining quantity forward onto a new business date (requires menu.stock)', ['Menu'], {
+      requestBody: { type: 'object', properties: { business_date: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/StockRow' } })) },
     }),
   },
 
@@ -910,12 +1078,143 @@ const paths: Record<string, Record<string, object>> = {
     }),
   },
 
+  // ── Orders — course firing (Phase 2, session 2c) ────────────────────────
+  '/orders/{id}/courses': {
+    get: op('Course state for every course with at least one item assigned (requires order.create) — 403 COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE unless send_by_course and venue_type in (happy_restaurant, happy_hybrid)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/OrderCourse' } })) },
+    }),
+  },
+  '/orders/{id}/courses/{n}/fire': {
+    post: op('Send a course\'s pending items to kitchen/bar — reuses the same send logic as POST /orders/:id/send (requires order.fire)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('n', 'Course number'), idempotencyKeyHeader],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/orders/{id}/courses/{n}/hold': {
+    post: op('Un-fire a course — reverts its sent items to pending — only while nothing in it has progressed past sent (requires order.fire)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('n', 'Course number')],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/orders/{id}/courses/reorder': {
+    post: op('Reassign course numbers by a full permutation of the order\'s existing ones (requires order.fire)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id')],
+      requestBody: { type: 'object', required: ['course_numbers'], properties: { course_numbers: { type: 'array', items: { type: 'integer' } } } },
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/orders/{id}/items/{itemId}/course': {
+    patch: op('Move an item to a different course — only while pending (requires order.create)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('itemId', 'Order item id')],
+      requestBody: { type: 'object', properties: { course_number: { type: ['integer', 'null'] } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { moved: { type: 'boolean' } } })) },
+    }),
+  },
+
+  // ── Orders — void request/approval (Phase 2, session 2d-i) ──────────────
+  '/orders/{id}/items/{itemId}/void': {
+    post: op('Request a void — auto-approved and cancelled immediately, or queued pending_approval per resolveVoidPolicy (requires order.void)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('itemId', 'Order item id'), idempotencyKeyHeader],
+      requestBody: { type: 'object', properties: { reason_code: { type: 'string' }, reason_text: { type: 'string' } } },
+      responses: {
+        '200': response('OK — cancelled immediately', envelope({ type: 'object', properties: { pending: { type: 'boolean', enum: [false] }, void: { $ref: '#/components/schemas/VoidLog' } } })),
+        '202': response('Accepted — queued for approval', envelope({ type: 'object', properties: { pending: { type: 'boolean', enum: [true] }, void: { $ref: '#/components/schemas/VoidLog' } } })),
+      },
+    }),
+  },
+
+  // ── Orders — split (Phase 2, sessions 2f-i/2f-ii) ────────────────────────
+  '/orders/{id}/split': {
+    post: op('Split a bill — equal / by_item / by_seat (requires order.split, gated by split_bill_enabled) — see docs/phase2/SESSION-2f-i.md and SESSION-2f-ii.md for each mode\'s payload', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), idempotencyKeyHeader],
+      requestBody: {
+        type: 'object',
+        required: ['split_type'],
+        properties: {
+          split_type: { type: 'string', enum: ['equal', 'by_item', 'by_seat'] },
+          ways: { type: 'integer', description: 'split_type=equal only.' },
+          allocations: {
+            type: 'array',
+            description: 'split_type=by_item only.',
+            items: { type: 'object', properties: { order_item_ids: { type: 'array', items: { type: 'string' } }, label: { type: 'string' } } },
+          },
+        },
+      },
+      responses: { '200': response('OK — every resulting order (parent + children, or the two by_seat orders)', envelope({ type: 'array', items: orderSchema })) },
+    }),
+  },
+  '/orders/{id}/splits': {
+    get: op('List the parent + all split children for this order (requires order.view_own)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: orderSchema })) },
+    }),
+  },
+  '/orders/{id}/splits/{childId}/merge-back': {
+    post: op('Undo a split — fold an unpaid child back into its parent (requires order.split)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('childId', 'Split child order id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { merged: { type: 'boolean' } } })) },
+    }),
+  },
+
+  // ── Orders — merge (Phase 2, session 2f-iii) ─────────────────────────────
+  '/orders/{id}/merge-preview': {
+    get: op('Preview a merge without applying it (requires order.merge). {id} is the target/survivor; source_order_id is absorbed and left status=merged.', ['Orders'], {
+      parameters: [pathParam('id', 'Order id (target/survivor)'), queryParam('source_order_id'), queryParam('target_table_id')],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/orders/{id}/merge': {
+    post: op('Merge source_order_id into this order — the source becomes status=merged (requires order.merge, order.merge_approve too if merge_requires_manager)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id (target/survivor)'), idempotencyKeyHeader],
+      requestBody: { type: 'object', required: ['source_order_id'], properties: { source_order_id: { type: 'string' }, target_table_id: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { target: orderSchema, source: orderSchema } })) },
+    }),
+  },
+
+  // ── Orders — payments (Phase 2, session 2g-i) ────────────────────────────
+  '/orders/{id}/payments': {
+    get: op('List payments on this order, including voided ones (requires order.view_own)', ['Orders'], {
+      parameters: [pathParam('id', 'Order id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/Payment' } })) },
+    }),
+    post: op('Record a payment against amount_due (requires order.payment) — cash is the only method allowed to exceed amount_due', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), idempotencyKeyHeader],
+      requestBody: {
+        type: 'object',
+        required: ['method', 'amount'],
+        properties: {
+          method: { type: 'string', enum: ['cash', 'card', 'bank_transfer', 'voucher', 'room_charge', 'other'] },
+          amount: { type: 'number' },
+          tip_amount: { type: 'number' },
+          reference: { type: 'string' },
+          received_amount: { type: 'number', description: 'Cash only — for change calculation.' },
+        },
+      },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Payment' })) },
+    }),
+  },
+  '/orders/{id}/payments/{pid}': {
+    delete: op('Void a payment (requires order.payment_void) — reason required', ['Orders'], {
+      parameters: [pathParam('id', 'Order id'), pathParam('pid', 'Payment id')],
+      requestBody: { type: 'object', required: ['reason'], properties: { reason: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Payment' })) },
+    }),
+  },
+
   // ── Displays ─────────────────────────────────────────────────────────────
   '/displays/kitchen': {
     get: op('Kitchen display tickets (requires display.view) — 403 if kitchen_display_enabled is false', ['Displays'], {
       parameters: [queryParam('course_number', { type: 'integer' }), queryParam('include_ready', { type: 'boolean' })],
       responses: {
-        '200': response('OK', envelope({ type: 'object', properties: { tickets: { type: 'array', items: { $ref: '#/components/schemas/DisplayTicket' } } } }, { $ref: '#/components/schemas/DisplayMeta' })),
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            tickets: { type: 'array', items: { $ref: '#/components/schemas/DisplayTicket' } },
+            fire_alerts: { type: 'array', items: { type: 'object' }, description: 'Always present, empty when none apply. Phase 2, session 2c.' },
+            void_alerts: { type: 'array', items: { type: 'object' }, description: 'Always present, empty when none apply. Phase 2, session 2d-ii.' },
+          },
+        }, { $ref: '#/components/schemas/DisplayMeta' })),
       },
     }),
   },
@@ -923,7 +1222,14 @@ const paths: Record<string, Record<string, object>> = {
     get: op('Bar display tickets (requires display.view) — 403 if bar_display_enabled is false', ['Displays'], {
       parameters: [queryParam('course_number', { type: 'integer' }), queryParam('include_ready', { type: 'boolean' })],
       responses: {
-        '200': response('OK', envelope({ type: 'object', properties: { tickets: { type: 'array', items: { $ref: '#/components/schemas/DisplayTicket' } } } }, { $ref: '#/components/schemas/DisplayMeta' })),
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: {
+            tickets: { type: 'array', items: { $ref: '#/components/schemas/DisplayTicket' } },
+            fire_alerts: { type: 'array', items: { type: 'object' }, description: 'Always present, empty when none apply. Phase 2, session 2c.' },
+            void_alerts: { type: 'array', items: { type: 'object' }, description: 'Always present, empty when none apply. Phase 2, session 2d-ii.' },
+          },
+        }, { $ref: '#/components/schemas/DisplayMeta' })),
       },
     }),
   },
@@ -954,6 +1260,32 @@ const paths: Record<string, Record<string, object>> = {
     }),
   },
 
+  // ── Displays — fire alerts (Phase 2, session 2c) ────────────────────────
+  '/displays/kitchen/fire-alerts': {
+    get: op('Unacknowledged course-fire alerts within show_fire_alert_seconds (requires display.view, gated by send_by_course)', ['Displays'], {
+      responses: { '200': response('OK', envelope({ type: 'array', items: { type: 'object' } })) },
+    }),
+  },
+  '/displays/fire-alerts/{id}/ack': {
+    post: op('Acknowledge (dismiss) a fire alert — {id} is the underlying order_courses id (requires display.bump)', ['Displays'], {
+      parameters: [pathParam('id', 'order_courses id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { acknowledged: { type: 'boolean' } } })) },
+    }),
+  },
+
+  // ── Displays — void alerts (Phase 2, session 2d-ii) ─────────────────────
+  '/displays/void-alerts': {
+    get: op('Unacknowledged after-send void alerts, kitchen and bar combined (requires display.view, gated by void_alerts_kitchen)', ['Displays'], {
+      responses: { '200': response('OK', envelope({ type: 'array', items: { type: 'object' } })) },
+    }),
+  },
+  '/displays/void-alerts/{id}/ack': {
+    post: op('Acknowledge (dismiss) a void alert — {id} is the underlying restaurant_void_log id (requires display.bump)', ['Displays'], {
+      parameters: [pathParam('id', 'restaurant_void_log id')],
+      responses: { '200': response('OK', envelope({ type: 'object', properties: { acknowledged: { type: 'boolean' } } })) },
+    }),
+  },
+
   // ── Permissions (Phase 2, session 2a-ii) ────────────────────────────────
   '/permissions': {
     get: op('Resolved permission matrix + display scope for the current user\'s role and venue — reflects settings-dependent resolution, not the static ceiling. What the frontend gates on.', ['Permissions'], {
@@ -966,6 +1298,167 @@ const paths: Record<string, Record<string, object>> = {
             display_scope: { type: 'object', properties: { kitchen: { type: 'boolean' }, bar: { type: 'boolean' } } },
           },
         })),
+      },
+    }),
+  },
+
+  // ── Voids (Phase 2, session 2d-i, list/approve routes) ──────────────────
+  '/voids/pending': {
+    get: op('Paginated void requests awaiting approval (requires void.approve)', ['Voids'], {
+      parameters: paginationParams,
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/VoidLog' } }, paginationMeta)) },
+    }),
+  },
+  '/voids': {
+    get: op('Paginated void request history (requires reports.view, settings-resolved)', ['Voids'], {
+      parameters: [...paginationParams, queryParam('from'), queryParam('to'), queryParam('status'), queryParam('user_id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/VoidLog' } }, paginationMeta)) },
+    }),
+  },
+  '/voids/{id}': {
+    get: op('Get a void request (requires reports.view, settings-resolved)', ['Voids'], {
+      parameters: [pathParam('id', 'Void request id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/VoidLog' })) },
+    }),
+  },
+  '/voids/{id}/approve': {
+    post: op('Approve a pending void request (requires void.approve)', ['Voids'], {
+      parameters: [pathParam('id', 'Void request id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/VoidLog' })) },
+    }),
+  },
+  '/voids/{id}/reject': {
+    post: op('Reject a pending void request — the item stays live (requires void.approve)', ['Voids'], {
+      parameters: [pathParam('id', 'Void request id')],
+      requestBody: { type: 'object', properties: { rejection_reason: { type: 'string' } } },
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/VoidLog' })) },
+    }),
+  },
+
+  // ── Shifts (Phase 2, session 2g-ii) ──────────────────────────────────────
+  '/shifts/open': {
+    post: op('Open a new shift for this venue — one open at a time (requires shift.manage)', ['Shifts'], {
+      requestBody: { type: 'object', properties: { name: { type: 'string' }, opening_float: { type: 'number' } } },
+      responses: {
+        '200': response('OK', envelope({ $ref: '#/components/schemas/Shift' })),
+        '409': response('A shift is already open (SHIFT_ALREADY_OPEN)', errorEnvelope),
+      },
+    }),
+  },
+  '/shifts/close': {
+    post: op('Close the open shift and materialize its final report (requires shift.manage) — pass ?force=true to close over still-open orders', ['Shifts'], {
+      parameters: [queryParam('force', { type: 'boolean' })],
+      requestBody: { type: 'object', properties: { closing_cash_counted: { type: 'number' }, notes: { type: 'string' } } },
+      responses: {
+        '200': response('OK', envelope({ $ref: '#/components/schemas/Shift' })),
+        '409': response('Open orders remain and force was not set (SHIFT_HAS_OPEN_ORDERS) — error.details.open_orders lists them', errorEnvelope),
+      },
+    }),
+  },
+  '/shifts/current': {
+    get: op('The open shift, if any, plus whether it has run past shift_auto_close_hours (requires reports.view, settings-resolved)', ['Shifts'], {
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: { shift: { anyOf: [{ $ref: '#/components/schemas/Shift' }, { type: 'null' }] }, flagged: { type: 'boolean' } },
+        })),
+      },
+    }),
+  },
+  '/shifts': {
+    get: op('Paginated shift history (requires reports.view, settings-resolved)', ['Shifts'], {
+      parameters: [...paginationParams, queryParam('from'), queryParam('to')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { $ref: '#/components/schemas/Shift' } }, paginationMeta)) },
+    }),
+  },
+  '/shifts/{id}': {
+    get: op('Get a shift (requires reports.view, settings-resolved)', ['Shifts'], {
+      parameters: [pathParam('id', 'Shift id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/Shift' })) },
+    }),
+  },
+
+  // ── Reports (Phase 2, sessions 2h-i/2h-ii) ───────────────────────────────
+  // Every route projects from the same computeReport(venueId, periodStart,
+  // periodEnd, shiftId?) — see docs/phase2/REPORT-PAYLOAD.md and
+  // docs/phase2/SESSION-2h-i.md/SESSION-2h-ii.md. Scope is resolved from
+  // either ?shift_id or ?from&to (business dates, both default to "today"),
+  // shared across every route below except GET /reports/shift/{id}.
+  '/reports/shift/{id}': {
+    get: op('The stored final report for this shift, or a live preview if it\'s still open (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [pathParam('id', 'Shift id')],
+      responses: { '200': response('OK', envelope({ $ref: '#/components/schemas/ReportPayload' })) },
+    }),
+  },
+  '/reports/range': {
+    get: op('A report over ?from&to or ?shift_id — optionally ?group_by=day|shift|waiter (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id'), queryParam('group_by')],
+      responses: {
+        '200': response(
+          'OK — one ReportPayload with no group_by; report.waiters alone for group_by=waiter; an array of {business_date, report} or {shift_id, report} for group_by=day|shift',
+          envelope({}),
+        ),
+      },
+    }),
+  },
+  '/reports/sales': {
+    get: op('{revenue, orders, covers} for the resolved scope (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id')],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/reports/waiters': {
+    get: op('report.waiters for the resolved scope (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id')],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { type: 'object' } })) },
+    }),
+  },
+  '/reports/voids': {
+    get: op('report.voids for the resolved scope (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id')],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/reports/items': {
+    get: op('report.top_items re-sorted by ?sort=quantity|revenue (default revenue), capped at ?limit (default 20, max 200) (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id'), queryParam('sort'), queryParam('limit', { type: 'integer' })],
+      responses: { '200': response('OK', envelope({ type: 'array', items: { type: 'object' } })) },
+    }),
+  },
+  '/reports/payments': {
+    get: op('report.payments for the resolved scope (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id')],
+      responses: { '200': response('OK', envelope({ type: 'object' })) },
+    }),
+  },
+  '/reports/generate': {
+    post: op('Materialize the resolved scope into shift_reports (is_final=true) — always computed fresh, unlike GET /reports/shift/{id}\'s cache-first read (requires reports.view, settings-resolved)', ['Reports'], {
+      parameters: [queryParam('from'), queryParam('to'), queryParam('shift_id')],
+      responses: {
+        '200': response('OK', envelope({
+          type: 'object',
+          properties: { shift_report_id: { type: 'string', format: 'uuid' }, report: { $ref: '#/components/schemas/ReportPayload' } },
+        })),
+      },
+    }),
+  },
+  '/reports/export': {
+    get: op('CSV or JSON export of one report section, byte-identical to its on-screen equivalent (requires reports.export, settings-resolved). Phase 2, session 2h-ii.', ['Reports'], {
+      parameters: [
+        queryParam('format', { type: 'string', enum: ['csv', 'json'] }),
+        queryParam('section', { type: 'string', enum: ['sales', 'waiters', 'voids', 'items', 'payments'] }),
+        queryParam('from'),
+        queryParam('to'),
+        queryParam('shift_id'),
+      ],
+      responses: {
+        '200': {
+          description: 'application/json (envelope-wrapped) when format=json; text/csv (raw, Content-Disposition: attachment) when format=csv. Shape depends on ?section — an array of rows for waiters/items, one object for sales/voids/payments.',
+          content: {
+            'application/json': { schema: envelope({}) },
+            'text/csv': { schema: { type: 'string' } },
+          },
+        },
       },
     }),
   },

@@ -68,15 +68,17 @@ orderItemsRouter.delete('/:itemId', requirePermission('order.void'), async (req:
 
 orderItemsRouter.post('/:itemId/void', requirePermission('order.void'), async (req: Request, res: Response) => {
   const { reason_code, reason_text } = req.body ?? {};
-  const result = await voidService.requestVoid(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, req.params.itemId, {
-    reasonCode: reason_code,
-    reasonText: reason_text,
+  await runIdempotent(req, res, 'POST /orders/:id/items/:itemId/void', async () => {
+    const result = await voidService.requestVoid(req.auth!.venueId, req.auth!.userId, req.auth!.role, req.params.id, req.params.itemId, {
+      reasonCode: reason_code,
+      reasonText: reason_text,
+    });
+    if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+    if (result.value.pending) {
+      return { status: 202, body: { data: { pending: true, void: result.value.voidLog }, meta: {} } };
+    }
+    return { status: 200, body: { data: { pending: false, void: result.value.voidLog }, meta: {} } };
   });
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  if (result.value.pending) {
-    return res.status(202).json({ data: { pending: true, void: result.value.voidLog }, meta: {} });
-  }
-  sendData(res, { pending: false, void: result.value.voidLog });
 });
 
 orderItemsRouter.patch('/:itemId/serve', requirePermission('order.serve'), async (req: Request, res: Response) => {

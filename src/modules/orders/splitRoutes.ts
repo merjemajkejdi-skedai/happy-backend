@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { runIdempotent } from '../../lib/idempotency';
 import { getSettingsRow } from '../settings/service';
 import { serializeOrder } from './serializers';
 import * as splitService from './splitService';
@@ -28,12 +29,15 @@ splitRouter.post('/split', requirePermission('order.split'), async (req: Request
     const { ways } = req.body ?? {};
     if (!Number.isInteger(ways)) return sendError(res, 'VALIDATION_ERROR', 'ways must be an integer');
 
-    const [result, settings] = await Promise.all([
-      splitService.splitEqual(req.auth!.venueId, req.auth!.userId, req.params.id, ways),
-      getSettingsRow(req.auth!.venueId),
-    ]);
-    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+    await runIdempotent(req, res, 'POST /orders/:id/split', async () => {
+      const [result, settings] = await Promise.all([
+        splitService.splitEqual(req.auth!.venueId, req.auth!.userId, req.params.id, ways),
+        getSettingsRow(req.auth!.venueId),
+      ]);
+      if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+      return { status: 200, body: { data: result.value.map(o => serializeOrder(o, settings?.pmsEnabled)), meta: {} } };
+    });
+    return;
   }
 
   if (split_type === 'by_item') {
@@ -43,21 +47,27 @@ splitRouter.post('/split', requirePermission('order.split'), async (req: Request
     }
     const mapped = allocations.map(a => ({ orderItemIds: a.order_item_ids, label: a.label ?? null }));
 
-    const [result, settings] = await Promise.all([
-      splitService.splitByItem(req.auth!.venueId, req.auth!.userId, req.params.id, mapped),
-      getSettingsRow(req.auth!.venueId),
-    ]);
-    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+    await runIdempotent(req, res, 'POST /orders/:id/split', async () => {
+      const [result, settings] = await Promise.all([
+        splitService.splitByItem(req.auth!.venueId, req.auth!.userId, req.params.id, mapped),
+        getSettingsRow(req.auth!.venueId),
+      ]);
+      if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+      return { status: 200, body: { data: result.value.map(o => serializeOrder(o, settings?.pmsEnabled)), meta: {} } };
+    });
+    return;
   }
 
   if (split_type === 'by_seat') {
-    const [result, settings] = await Promise.all([
-      splitService.splitBySeat(req.auth!.venueId, req.auth!.userId, req.params.id),
-      getSettingsRow(req.auth!.venueId),
-    ]);
-    if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-    return sendData(res, result.value.map(o => serializeOrder(o, settings?.pmsEnabled)));
+    await runIdempotent(req, res, 'POST /orders/:id/split', async () => {
+      const [result, settings] = await Promise.all([
+        splitService.splitBySeat(req.auth!.venueId, req.auth!.userId, req.params.id),
+        getSettingsRow(req.auth!.venueId),
+      ]);
+      if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+      return { status: 200, body: { data: result.value.map(o => serializeOrder(o, settings?.pmsEnabled)), meta: {} } };
+    });
+    return;
   }
 
   return sendError(res, 'VALIDATION_ERROR', "split_type must be 'equal', 'by_item', or 'by_seat'");

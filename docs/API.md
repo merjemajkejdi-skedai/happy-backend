@@ -154,7 +154,7 @@ Replaces Phase 1's void behavior entirely (including on the legacy `DELETE /orde
 
 | Method | Path | Permission | Description | Gating flag(s) |
 |---|---|---|---|---|
-| POST | `/orders/{id}/items/{itemId}/void` | `order.void` | Request (or, if no approval is needed, immediately execute) a void. `{reason_code, reason_text}` — at least one required when `void_reason_required`. 202 with the void record if queued for approval, 200 if resolved immediately. | `void_reason_required`, `void_before_send_requires_approval`, `void_requires_approval`, `void_approval_role` |
+| POST | `/orders/{id}/items/{itemId}/void` | `order.void` | Request (or, if no approval is needed, immediately execute) a void. `{reason_code, reason_text}` — at least one required when `void_reason_required`. 202 with the void record if queued for approval, 200 if resolved immediately. `Idempotency-Key` aware. | `void_reason_required`, `void_before_send_requires_approval`, `void_requires_approval`, `void_approval_role` |
 | GET | `/voids/pending` | `void.approve` | Manager/admin approval queue — paginated `restaurant_void_log` rows with `status='pending_approval'`. | — |
 | POST | `/voids/{id}/approve` | `void.approve` | Cancels the item, sets `void_id`, recomputes order totals, resolves the matching `approval_requests` row. | — |
 | POST | `/voids/{id}/reject` | `void.approve` | `{rejection_reason}` — item stays live and untouched; the void log is still resolved (`status='rejected'`) for reporting. | — |
@@ -167,7 +167,7 @@ Requires `split_bill_enabled` AND `split_equal_enabled`, else 403 `SPLIT_MODE_DI
 
 | Method | Path | Permission | Description | Gating flag(s) |
 |---|---|---|---|---|
-| POST | `/orders/{id}/split` | `order.split` | `{split_type: 'equal', ways}` — `ways` between 2 and `split_max_ways` (422 `SPLIT_WAYS_INVALID` otherwise). Creates `ways` child orders (own `order_number`/`ticket_number`, `parent_order_id`, `split_type='equal'`, `split_sequence` 1..n), each `status='served'` since the synthetic item needs no kitchen/bar prep. One transaction — any failure rolls back all children. Returns the array of created child orders. | `split_bill_enabled`, `split_equal_enabled` |
+| POST | `/orders/{id}/split` | `order.split` | `{split_type: 'equal', ways}` — `ways` between 2 and `split_max_ways` (422 `SPLIT_WAYS_INVALID` otherwise). Creates `ways` child orders (own `order_number`/`ticket_number`, `parent_order_id`, `split_type='equal'`, `split_sequence` 1..n), each `status='served'` since the synthetic item needs no kitchen/bar prep. One transaction — any failure rolls back all children. Returns the array of created child orders. `Idempotency-Key` aware (covers all three `split_type` modes). | `split_bill_enabled`, `split_equal_enabled` |
 | GET | `/orders/{id}/splits` | `order.view_own` | The child orders for a given parent, ordered by `split_sequence`. | — |
 | POST | `/orders/{id}/splits/{childId}/merge-back` | `order.split` | Undo — only while the child is unpaid (409 `ORDER_ALREADY_PAID` otherwise). Deletes the child order (its synthetic item cascades), then recomputes the parent (a no-op in practice, since the parent's own items were never touched by the split). | — |
 
@@ -199,7 +199,7 @@ Merge is **irreversible** in Phase 2 — there is no undo. `GET .../merge-previe
 | Method | Path | Permission | Description |
 |---|---|---|---|
 | GET | `/orders/{id}/merge-preview` | `order.merge` | Query: `?source_order_id=...&target_table_id=...` (both same as POST). Dry run — no writes. Returns `{target_order_id, source_order_id, item_count, grand_total, courses: [{course_number, item_count, status, fired_at}]}`. |
-| POST | `/orders/{id}/merge` | `order.merge` | `{source_order_id, target_table_id?}`. Returns `{target, source}`, both full serialized orders. |
+| POST | `/orders/{id}/merge` | `order.merge` | `{source_order_id, target_table_id?}`. Returns `{target, source}`, both full serialized orders. `Idempotency-Key` aware. |
 
 Events: `order.merged` appended to the target, `order.absorbed` appended to the source — never a single event trying to describe both sides at once, since `order_events.order_id` can only ever point to one order.
 
@@ -209,7 +209,7 @@ A cash-drawer log, not a payment processor — no gateway, no card data, no PCI 
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| POST | `/orders/{id}/payments` | `order.payment` | `{method, amount, tip_amount?, reference?, received_amount?}`. |
+| POST | `/orders/{id}/payments` | `order.payment` | `{method, amount, tip_amount?, reference?, received_amount?}`. `Idempotency-Key` aware. |
 | GET | `/orders/{id}/payments` | `order.view_own` | All payments on this order (voided ones included, `is_voided` distinguishes them), oldest first. |
 | DELETE | `/orders/{id}/payments/{pid}` | `order.payment_void` (manager+) | `{reason}`. Sets `is_voided`/`voided_reason`/`voided_by_user_id` and recomputes the order — the row is never deleted. |
 
@@ -271,7 +271,7 @@ Every route below requires `send_by_course=true` AND `venue_type` in (`happy_res
 | Method | Path | Permission | Description | Gating flag(s) |
 |---|---|---|---|---|
 | GET | `/orders/{id}/courses` | `order.create` | Course state (status, fired_at, item_count, first_ready_at, all_served_at) for every course that's had an item assigned. | `send_by_course` |
-| POST | `/orders/{id}/courses/{n}/fire` | `order.fire` | Send that course's pending items (reuses the same send logic as `POST /orders/:id/send`, including `destination:'none'` skipping straight to `served`). No-op success on an empty or already-fired course. | `send_by_course`, `course_fire_requires_previous_served` |
+| POST | `/orders/{id}/courses/{n}/fire` | `order.fire` | Send that course's pending items (reuses the same send logic as `POST /orders/:id/send`, including `destination:'none'` skipping straight to `served`). No-op success on an empty or already-fired course. `Idempotency-Key` aware. | `send_by_course`, `course_fire_requires_previous_served` |
 | POST | `/orders/{id}/courses/{n}/hold` | `order.fire` | Un-fires a course — reverts its `sent` items back to `pending` — only while nothing in it has reached `preparing`/`ready`/`served`. 409 `COURSE_ALREADY_STARTED` otherwise. No-op success if the course was never fired. | `send_by_course` |
 | POST | `/orders/{id}/courses/reorder` | `order.fire` | `{course_numbers: number[]}` — a full permutation of this order's existing course numbers; array position becomes the new course number. **Best-effort implementation — spec gave no payload example for this route; see `docs/phase2/SESSION-2c.md`.** | `send_by_course` |
 | PATCH | `/orders/{id}/items/{itemId}/course` | `order.create` | Move an item to a different course — only while `pending` (409 `ITEM_ALREADY_SENT` otherwise). | `send_by_course`, `courses_enabled` |
@@ -316,3 +316,5 @@ Phase 1 is polling-only — no WebSockets/SSE. Response shape is locked (snake_c
 ## Idempotency
 
 `POST /orders`, `POST /orders/:id/items`, and `POST /orders/:id/send` accept an `Idempotency-Key` header, scoped to `(venue_id, user_id, route, key)`. A replay within 24h of the original request returns the exact original response (status + body) without re-running the business logic; a concurrent duplicate gets `409 IDEMPOTENCY_IN_PROGRESS`. See `src/lib/idempotency.ts`.
+
+Phase 2, session 2h-ii additionally wires the same mechanism onto every Phase 2 route named in `docs/phase2/2h-ii.md` section 2: `POST /orders/:id/split`, `POST /orders/:id/merge`, `POST /orders/:id/payments`, `POST /orders/:id/courses/:n/fire`, `POST /orders/:id/items/:itemId/void`.

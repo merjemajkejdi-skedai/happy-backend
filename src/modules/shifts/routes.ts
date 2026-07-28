@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { venueScope } from '../../middleware/venueScope';
-import { requirePermission } from '../../middleware/rbac';
+import { requirePermission, requireResolvedPermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
 import { parsePagination, buildPaginationMeta } from '../../lib/pagination';
 import * as shiftsService from './shiftsService';
@@ -32,21 +32,26 @@ shiftsRouter.post('/close', requirePermission('shift.manage'), async (req: Reque
   sendData(res, result.value);
 });
 
+// reports.view is settings-dependent (reports_visible_to_manager) —
+// requireResolvedPermission, not the static requirePermission, per the same
+// fix applied to reports/routes.ts this session (2h-ii). See
+// docs/phase2/SESSION-2h-ii.md.
+//
 // GET /current — before GET /:id, so the literal path isn't swallowed by
 // the :id param route (same reasoning as voidsRouter's /pending).
-shiftsRouter.get('/current', requirePermission('reports.view'), async (req: Request, res: Response) => {
+shiftsRouter.get('/current', requireResolvedPermission('reports.view'), async (req: Request, res: Response) => {
   const result = await shiftsService.getCurrentShift(req.auth!.venueId);
   sendData(res, { shift: result.shift, flagged: result.flagged });
 });
 
-shiftsRouter.get('/', requirePermission('reports.view'), async (req: Request, res: Response) => {
+shiftsRouter.get('/', requireResolvedPermission('reports.view'), async (req: Request, res: Response) => {
   const { from, to } = req.query as Record<string, string>;
   const { page, perPage } = parsePagination(req.query);
   const result = await shiftsService.listShifts(req.auth!.venueId, { from, to, page, perPage });
   sendData(res, result.shifts, buildPaginationMeta(result.page, result.perPage, result.total));
 });
 
-shiftsRouter.get('/:id', requirePermission('reports.view'), async (req: Request, res: Response) => {
+shiftsRouter.get('/:id', requireResolvedPermission('reports.view'), async (req: Request, res: Response) => {
   const shift = await shiftsService.getShift(req.auth!.venueId, req.params.id);
   if (!shift) return sendError(res, 'NOT_FOUND', 'Shift not found');
   sendData(res, shift);

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requirePermission } from '../../middleware/rbac';
 import { sendData, sendDomainError, sendError } from '../../lib/response';
+import { runIdempotent } from '../../lib/idempotency';
 import * as coursesService from './coursesService';
 
 // mergeParams: true — mounted at /orders/:id, same as lifecycleRouter.
@@ -14,9 +15,11 @@ coursesRouter.get('/courses', requirePermission('order.create'), async (req: Req
 
 coursesRouter.post('/courses/:n/fire', requirePermission('order.fire'), async (req: Request, res: Response) => {
   const courseNumber = Number(req.params.n);
-  const result = await coursesService.fireCourse(req.auth!.venueId, req.auth!.userId, req.params.id, courseNumber);
-  if (!result.ok) return sendDomainError(res, result.error.status, result.error.code, result.error.message);
-  sendData(res, result.value);
+  await runIdempotent(req, res, 'POST /orders/:id/courses/:n/fire', async () => {
+    const result = await coursesService.fireCourse(req.auth!.venueId, req.auth!.userId, req.params.id, courseNumber);
+    if (!result.ok) return { status: result.error.status, body: { error: { code: result.error.code, message: result.error.message } } };
+    return { status: 200, body: { data: result.value, meta: {} } };
+  });
 });
 
 coursesRouter.post('/courses/:n/hold', requirePermission('order.fire'), async (req: Request, res: Response) => {
