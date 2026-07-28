@@ -1,6 +1,6 @@
 import type { CourseStatus, OrderItemStatus, OrderStatus } from '../../generated/prisma/client';
 
-export type ExplicitOrderFlag = 'closed' | 'cancelled' | null | undefined;
+export type ExplicitOrderFlag = 'closed' | 'cancelled' | 'merged' | null | undefined;
 
 // The single place order_status is decided — every mutation that can change
 // item state (add, update, void, send, serve, close, cancel) recomputes and
@@ -12,6 +12,7 @@ export type ExplicitOrderFlag = 'closed' | 'cancelled' | null | undefined;
 export function deriveOrderStatus(items: { status: OrderItemStatus }[], explicitFlag?: ExplicitOrderFlag): OrderStatus {
   if (explicitFlag === 'closed') return 'closed';
   if (explicitFlag === 'cancelled') return 'cancelled';
+  if (explicitFlag === 'merged') return 'merged';
 
   const active = items.filter(i => i.status !== 'cancelled');
   if (active.length === 0) return 'draft';

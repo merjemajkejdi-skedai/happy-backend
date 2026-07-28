@@ -184,6 +184,25 @@ Requires `split_bill_enabled` AND `split_by_item_enabled`, else 403 `SPLIT_MODE_
 
 `GET /orders/:id/splits` and `POST /orders/:id/splits/:childId/merge-back` are shared with equal split — see the section above. `merge-back` was designed for undoing an *equal* split (it deletes the child and its single synthetic item); running it on a `by_item`/`by_seat` child would delete real order items along with it, which is very likely not what's wanted — treat merge-back as equal-split-only until a future session addresses reversing an item-level split explicitly.
 
+## Orders — merge (Phase 2, session 2f-iii)
+
+Combines two live orders into one. **Not related to split's `merge-back`** (which only undoes an equal split) — this is the reverse direction, combining two independently-opened orders, e.g. two tables that decide to share one bill.
+
+**Direction:** the `:id` route param is always the **TARGET** (the survivor). `source_order_id` is the order being absorbed — it ends as `status='merged'` (not `'cancelled'`, since the food was still served) with `merged_into_order_id`/`merged_at`/`merged_by_user_id` set and its own totals zeroed. Getting this backwards is the likeliest integration bug, so it is called out here explicitly.
+
+Requires `merge_tables_enabled`, else 403 `MERGE_DISABLED`. A waiter additionally requires `merge_requires_manager=false` — enforced both by `resolvePermissions` narrowing `order.merge` away from waiter at the permission layer, and redundantly inside `mergeService` itself (403 `MERGE_REQUIRES_MANAGER`) so the same rule holds for direct service calls, not just HTTP requests. Both orders must be in the same venue, active (not `closed`/`cancelled`/`merged` — 409 `ORDER_NOT_MODIFIABLE`), unpaid (409 `ORDER_ALREADY_PAID`), and neither a split-bill child nor a split-bill parent with live (unresolved) children (409 `MERGE_ORDER_HAS_SPLIT`).
+
+All non-cancelled source items reassign to the target in place (`order_id` only — every snapshot, status, and timestamp preserved, matching `by_item` split's own move semantics). Parent and target are both recomputed through the normal totals formula. Course rows reconcile by `course_number`: item counts roll up automatically through the same mechanism every other course recompute uses; when both sides had already fired the same course number, the **earlier** `fired_at` (and its `fired_by_user_id`) wins, and course `status`/`first_ready_at`/`all_served_at` are re-derived honestly from the now-combined item set rather than left at whatever a freshly-created row would otherwise default to. The source's table (if any) becomes `dirty`; the target's table is untouched unless `target_table_id` is given, in which case the target is transferred there first (reuses `transferOrder` as a genuinely separate, real operation — its own errors, e.g. `TRANSFER_DISABLED`/`TABLE_INACTIVE`/`TABLE_ALREADY_HAS_ACTIVE_ORDER`, propagate as-is and abort the merge before anything else happens).
+
+Merge is **irreversible** in Phase 2 — there is no undo. `GET .../merge-preview` exists for this reason: it runs the identical move/recompute/reconciliation logic inside a database transaction that is always rolled back, so its numbers are guaranteed to match a real `POST .../merge` exactly, never a hand-duplicated estimate.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/orders/{id}/merge-preview` | `order.merge` | Query: `?source_order_id=...&target_table_id=...` (both same as POST). Dry run — no writes. Returns `{target_order_id, source_order_id, item_count, grand_total, courses: [{course_number, item_count, status, fired_at}]}`. |
+| POST | `/orders/{id}/merge` | `order.merge` | `{source_order_id, target_table_id?}`. Returns `{target, source}`, both full serialized orders. |
+
+Events: `order.merged` appended to the target, `order.absorbed` appended to the source — never a single event trying to describe both sides at once, since `order_events.order_id` can only ever point to one order.
+
 ## Orders — course firing (Phase 2, session 2c)
 
 Every route below requires `send_by_course=true` AND `venue_type` in (`happy_restaurant`, `happy_hybrid`) — 403 `COURSES_NOT_AVAILABLE_FOR_VENUE_TYPE` otherwise (venue type checked first).

@@ -1,0 +1,42 @@
+# Session 2f-iii — Merge Orders
+
+**Status:** Complete. Full suite green (25 files / 542 tests), `tsc --noEmit` clean. No migration needed — `order_status.merged`, `orders.merged_into_order_id`/`merged_at`/`merged_by_user_id`, `restaurant_settings.merge_tables_enabled`/`merge_requires_manager`, and the `order.merge`/`order.merge_approve` permissions (static matrix + a `resolvePermissions` narrowing case) were all already in place from 2a-i/2a-ii; this session is the first to write real logic against them.
+
+## Implemented
+
+### 1. `statusMachine.ts` — minimal extension
+
+`ExplicitOrderFlag` gained `'merged'` alongside `'closed'`/`'cancelled'`, and `deriveOrderStatus` gained one line (`if (explicitFlag === 'merged') return 'merged';`). This lets the source order's terminal state flow through `recomputeOrder`'s existing `explicitFlag`/`extraData` mechanism — the same one `close`/`cancel` already use — rather than bypassing it with a hand-written update.
+
+### 2. `src/modules/orders/mergeService.ts`
+
+- `checkMergeGate` — section 2's gate list in order: same-order guard (422), both orders exist in-venue (404), `merge_tables_enabled` (403 `MERGE_DISABLED`), waiter blocked when `merge_requires_manager` (403 `MERGE_REQUIRES_MANAGER`, redundant with the permission-layer narrowing — see below), both active/not-already-`merged` (409 `ORDER_NOT_MODIFIABLE`, reused), both unpaid (409 `ORDER_ALREADY_PAID`, reused), neither a split child nor a split parent with live children (409 `MERGE_ORDER_HAS_SPLIT`, new).
+- `runMergeTransaction` — the one place both commit and preview run the actual logic: move all non-cancelled source items to the target (`order_id` only — every snapshot/status/timestamp untouched), `recomputeOrder` the source with `explicitFlag:'merged'` + `extraData` for the merge fields, `recomputeOrder` the target, course reconciliation (see below), source table → `dirty`, `order.merged`/`order.absorbed` events.
+- `mergeOrders` — the gate, then (if `target_table_id` differs from the target's current table) a real, separately-committed call to the existing `lifecycleService.transferOrder` *before* the merge transaction, then `runMergeTransaction` for real.
+- `previewMerge` — the identical gate, a lightweight *validation-only* replica of `transferOrder`'s own checks (never calls it for real), then runs `runMergeTransaction` inside a `scopedPrisma.$transaction` that a `PreviewRollback` sentinel always throws out of at the end — guaranteeing preview and commit can never drift apart, because they are the same code.
+
+### 3. Course reconciliation
+
+`recomputeOrder`'s existing course roll-up (`recomputeCourses`) already handles "create rows on the target as needed" and "recompute item_count" for free, as a side effect of the item move + the two `recomputeOrder` calls. The one piece it can't do — "take the earlier `fired_at` when both sides fired the same course" — is hand-rolled in `runMergeTransaction`: for every source course that was ever fired, compare it against the target's *pre-merge* row for that same `course_number`; the earlier `fired_at`/`fired_by_user_id` wins, and `status`/`first_ready_at`/`all_served_at` are re-derived from the target's *actual combined* item set for that course (via `deriveCourseStatus('fired', ...)`) rather than left at whatever a freshly-auto-created row would otherwise default to (`'pending'`, nulls) — see the interpretation call below.
+
+### 4. Routes + docs
+
+`src/modules/orders/mergeRoutes.ts` (new): `GET /orders/:id/merge-preview?source_order_id&target_table_id`, `POST /orders/:id/merge {source_order_id, target_table_id?}`, both gated by `order.merge`, wired into `orders/routes.ts` alongside `splitRouter`. `docs/API.md` (new "Orders — merge" section, explicit about the target/source direction), `docs/ERRORS.md` (`MERGE_DISABLED`, `MERGE_REQUIRES_MANAGER`, `MERGE_ORDER_HAS_SPLIT`, plus notes added to the reused `ORDER_ALREADY_PAID`/`ORDER_NOT_MODIFIABLE` rows).
+
+## Interpretation calls — flagged explicitly
+
+- **`order.merge_approve` is declared but never checked directly.** The pre-existing (2a-ii) `resolvePermissions` already narrows waiter's own `order.merge` away entirely when `merge_requires_manager=true` — meaning `requirePermission('order.merge')` alone already produces the exact 403 the spec describes for that case, at the HTTP layer. `mergeService.checkMergeGate` re-derives the same waiter/`merge_requires_manager` rule itself (403 `MERGE_REQUIRES_MANAGER`) purely so a test calling the service directly — this whole arc's own established testing convention, bypassing HTTP+RBAC — still gets it. `order.merge_approve` stays declared, unused by this session; not touched, since it's 2a-ii's own pre-declared permission and out of this session's scope to repurpose.
+- **A brand-new target course row inheriting a fired source course gets its `status` honestly re-derived, not left at the schema default `'pending'`.** `recomputeCourses`'s generic create-branch never sets a fresh row's `status` past `'pending'` regardless of the items' real progress — a real, narrow gap (also latently present in 2f-ii's `by_item` split, not fixed there or here, out of both sessions' scope to touch `recomputeCourses` itself). This session's own course-reconciliation step works around it *locally*, for merge only, by explicitly calling `deriveCourseStatus('fired', ...)` against the target's actual post-merge items whenever the source's course was ever fired — never touching the shared `recomputeCourses` function other sessions depend on.
+- **Merge has no natural DB-constraint tripwire for a "rollback on failure" test**, unlike split (which allocates fresh `order_number`s a test can pre-occupy). Merge only moves/updates existing rows — nothing it writes is uniquely constrained. `previewMerge` itself *is* a real, deterministic exercise of the exact same guarantee: it runs the identical write sequence inside a transaction that is *always* rolled back via a thrown sentinel, so `tests/merge.test.ts`'s rollback test asserts zero observable side effects survive that guaranteed rollback — a genuine, non-racy atomicity proof using the actual code path, not a weaker substitute.
+- **`target_table_id`'s transfer step reuses `allowTableTransfer` as its own gate.** Not stated either way by the spec; if a venue has disabled table transfers generally, blocking the merge's optional relocation too is the more conservative default. `previewMerge` validates the same constraints (table exists/active, no conflicting active order) without ever calling `transferOrder` for real — table state is irrelevant to the item/total/course numbers it reports anyway.
+- **A cross-venue `source_order_id` surfaces as plain 404 `NOT_FOUND`**, not a dedicated code — the venue-scoped lookup simply finds nothing, the same way every other module in this codebase already handles a wrong-venue id.
+
+## Tests
+
+`tests/merge.test.ts` (new, 14 tests): items move with snapshots/status/timestamps intact; source ends `status='merged'` (not `'cancelled'`) with `merged_into_order_id`/`merged_at`/`merged_by_user_id` set and totals zeroed; source table freed to `dirty`, target table untouched by default; `target_table_id` transfers the target first; target `grand_total` conserves both orders' totals including tax; `MERGE_DISABLED` when the venue flag is off; `merge_requires_manager` blocks a waiter but allows a manager; paid-order rejection; already-merged-order rejection (both as target and as source); cross-venue rejection; split-child/split-parent-with-live-child rejection (both directions); course reconciliation takes the earlier `fired_at` when both sides fired the same course number and rolls up `item_count` correctly; preview matches the committed result exactly (`item_count`, `grand_total`, `courses`) and provably writes nothing itself; rollback via `previewMerge`'s guaranteed internal transaction abort leaves the DB completely unchanged.
+
+Full suite: 25 files, 542 tests, all passing. `tsc --noEmit` clean.
+
+## Next session starting point
+
+Per `docs/phase2/README.md`'s numbering (not yet read this session) — 2f-i/ii/iii (split equal, split by item/seat, merge) are now all complete. The next arc is whatever `2g-i`/`2g-ii` cover per the existing `docs/phase2/2g-i.md`/`2g-ii.md` files (payments, per several earlier sessions' own forward references to "payments arrive in 2g-i"). This session did not touch payments/shifts.

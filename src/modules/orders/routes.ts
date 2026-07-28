@@ -13,6 +13,7 @@ import { orderItemsRouter } from './orderItemsRoutes';
 import { lifecycleRouter } from './lifecycleRoutes';
 import { coursesRouter } from './coursesRoutes';
 import { splitRouter } from './splitRoutes';
+import { mergeRouter } from './mergeRoutes';
 import type { OrderStatus, ServiceMode } from '../../generated/prisma/client';
 
 export const ordersRouter = Router();
@@ -116,3 +117,4 @@ ordersRouter.use('/:id/items', orderItemsRouter);
 ordersRouter.use('/:id', lifecycleRouter);
 ordersRouter.use('/:id', coursesRouter);
 ordersRouter.use('/:id', splitRouter);
+ordersRouter.use('/:id', mergeRouter);

@@ -127,6 +127,11 @@ export const ERROR_CODES = [
   'SPLIT_ITEM_DOUBLE_ALLOCATED',
   'SPLIT_ITEM_CANCELLED',
 
+  // ── Orders — merge (Phase 2, session 2f-iii) ──────────────────────────────
+  'MERGE_DISABLED',
+  'MERGE_REQUIRES_MANAGER',
+  'MERGE_ORDER_HAS_SPLIT',
+
   // ── Displays ─────────────────────────────────────────────────────────────
   'DISPLAY_DISABLED',
   'NO_ITEMS_TO_BUMP',
